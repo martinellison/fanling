@@ -1,0 +1,8 @@
+{# needs to be pushed to id=always whenever contents should change #}
+{% if needs_push -%}
+<input type=button onclick='invoke({a: {Push: {force: false}}})' value='Push' />
+<input type=button onclick='invoke({a: {Push: {force: true}}})' value='Push (force)' />
+<input type=button onclick='invoke({a: {PushAndQuit: {force: false}}})' value='Push and Quit' />
+{% else -%}
+<input type=button onclick='doAction("Shutdown", "", "")' value='Quit' />
+{% endif -%}

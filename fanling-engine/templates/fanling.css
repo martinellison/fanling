@@ -1,0 +1,113 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* colours from http://paletton.com/#uid=10b0u0kmRmRn24bn7d0lqvjkAR7 * */
+
+html, body {
+     background-color: #682E1D;
+     color: #ffffff;
+     font-family: sans-serif;
+     font-size: 1em;
+     min-height: 100vh;
+}
+ h1, h2, h3, h4, h5 {
+     color: #ff805b;
+}
+ a {
+     color: #ff805b;
+     text-decoration: underline;
+}
+ a.big {
+     padding: 1em;
+     margin: 1em;
+}
+ th {
+     text-align: left;
+}
+ td, p, li {
+     color: #F97853;
+     font-size: 1em;
+}
+ tr.alert {
+     color: #210f09;
+     background-color: #ff805b;
+     font-weight: bold;
+}
+ tr.alert a {
+     color: #210f09;
+}
+ textarea {
+     height: 100%;
+     width: 95%;
+     color: #210f09;
+     font-family: sans-serif;
+     font-size: 1em;
+}
+ input, select {
+     color: #210f09;
+     font-family: sans-serif;
+     font-size: 1em;
+}
+ li.block {
+     color: #ffffff;
+}
+ div.error {
+     font-weight: bold;
+     font-size: 200%;
+}
+ @media handheld {
+     html, body {
+         margin: 0.2em;
+         padding: 0.2em;
+         float: none;
+    }
+ }
+  /* Remove default bullets */
+ul, #myUL {
+  list-style-type: none;
+}
+
+/* Remove margins and padding from the parent ul */
+#myUL {
+  margin: 0;
+  padding: 0;
+}
+
+/* Style the caret/arrow */
+.caret {
+  cursor: pointer;
+  user-select: none; /* Prevent text selection */
+}
+
+/* Create the caret/arrow with a unicode, and style it */
+.caret::before {
+  content: "\25B6";
+  color: #ff805b;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* Rotate the caret/arrow icon when clicked on (using JavaScript) */
+.caret-down::before {
+  transform: rotate(90deg);
+}
+
+/* Hide the nested list */
+.nested {
+  display: none;
+}
+
+/* Show the nested list when the user clicks on the caret/arrow (with JavaScript) */
+.active {
+  display: block;
+}
+
+span.itemlink {
+    text-decoration: underline;
+    color: #ff805b;
+}
+span.itemlink:hover {
+    cursor: pointer;
+    color: #F97853;
+}

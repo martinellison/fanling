@@ -1,0 +1,83 @@
+<!-- create/edit task -->
+<table width='90%'>
+    <tr>
+        <td colspan=2><span id=error></span></td>
+    </tr>
+    <tr>
+        <td colspan=2><span id=message></span></td>
+    </tr>
+    <tr>
+        <th>Name:</th>
+        <td><input name=name id=name size=40 value="{{data.name|escape}}" spellcheck=true></input></td>
+        <td><span id='name-error'></span></td>
+    </tr>
+    <tr>
+        <td colspan=2><span id='text-error'></span></td>
+    </tr>
+    <tr>
+        <th>Parent:</th>
+        <td><select id=parent>
+                {% for o in base.parent.entries -%}
+                <option value="{{- o.link.ident -}}" {%if o.selected%}selected{%endif%}>{{o.descr|escape}}</option>
+                {% endfor %}
+            </select></td>
+        <td></td>
+    </tr>
+    <tr>
+        <th>Context:</th>
+        <td><select id=context>
+                {% for o in context.entries -%}
+                <option value="{{- o.link.ident -}}" {%if o.selected%}selected{%endif%}>{{o.descr|escape}}</option>
+                {% endfor %}
+            </select></td>
+        <td></td>
+    </tr>
+    <tr>
+        <th>Can be parent:</th>
+        <td>
+            <input type=checkbox id=canbeparent {% if base.can_be_parent %} checked {%
+       endif %}>Can be parent?</td>
+    </tr>
+    <tr>
+        <th>Can be context:</th>
+        <td>
+            <input type=checkbox id=canbecontext {% if base.can_be_context %} checked {%
+       endif %}></td>
+    </tr>
+    <tr>
+        <th>Sort within parent:</th>
+        <td> <input id=sort value="{{base.sort|escape}}" /></td>
+    </tr>
+    <tr>
+        <th>Priority:</th>
+        <td> <input id=priority value="{{priority|escape}}" /></td> <td><span id='priority-error'></span></td>
+    </tr>
+    <tr>
+        <th>Status:</th>
+        <td>{{status|escape}}
+        </td>
+    </tr>
+    <tr>
+        <th>Deadline:</th>
+        <td> <input id=deadline value="{{deadline|escape}}" />  </td> <td><span id='deadline-error'></span></td>
+    </tr>
+    <tr>
+        <th>Show after:</th>
+        <td> <input id=showafterdate value="{{show_after_date|escape
+        }}" /> <td><span id='show-after-date-error'></span></td>  </td>
+    </tr>
+    <tr>
+        <td colspan=2>
+            <textarea name=text id=text rows=10 width='100%' spellcheck=true>{{broken_text|safe}}</textarea>
+        </td>
+    </tr>
+</table>
+<input type=button onclick='onclick_task(
+       {% if base.has_ident %} "{{- base.ident|escape -}}" {% else %} "" {% endif %},
+       "{{base.next_op}}")' value="{{base.next_op_name}}" />
+{% if base.has_ident %}
+<input type=button onclick='invoke({ t:"Task",  i:
+       "{{- base.ident|escape -}}", a: "Show"})' value="Show" />
+<input type=button onclick='invoke({ t:"Task",  i:
+       "{{- base.ident|escape -}}", a: "Delete"})' value="Delete" />
+{% endif %}

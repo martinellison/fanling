@@ -1,0 +1,25 @@
+[package]
+name = "fanling10"
+version = "0.1.0"
+authors = ["martin <m.e@acm.org>"]
+edition = "2018"
+
+[dependencies]
+
+fanling-engine = { path = "../fanling-engine" }
+fanling-interface = { path = "../fanling-interface" }
+ansi_term = "0.12.1"
+askama = "0.9.0"
+rust-embed = "5.2.0"
+serde = "1.0.104"
+serde_derive = "1.0.104"
+serde_json = "1.0.44"
+structopt = "0.3.8"
+taipo-git-control = { path = "../taipo-git-control" }
+askama_shared = "0.9.1"
+quick-error = "1.2.3"
+config = "0.10.1"
+log = "0.4.8"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+web-view = "0.6.0"

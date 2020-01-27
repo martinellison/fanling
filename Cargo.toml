@@ -1,0 +1,4 @@
+[workspace]
+members = ['taipo-git-control', "fanling-interface",
+"fanling-c-interface", 'fanling-engine', 'fanling10']
+exclude = ['webview-test']

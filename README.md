@@ -1,12 +1,6 @@
-# fanling10
-
-## CURRENT ISSUES
-  
 ## Introduction
 
-Version of fanling using rust.
-
-Fanling10 is the current version of Fanling.
+Fanling10 is is a version of fanling using rust.
 
 ## Fanling
 
@@ -35,8 +29,17 @@ Fanling can store different kinds of data. At present, it stores:
 * text pages with Markdown (similar to wiki pages)
 * to-do items
 
+Fanling can be extended to add new kinds of data.
+
 ## Detailed documentation
 
-Use `cargo doc --all --open` to generate the exisitng code generation
+Use `cargo doc --all --open` to generate the existing code generation
 for the Rust code. (Add `--document-private-items` for documentation
 of non-public items).
+
+## Current status
+
+Currently preparing for release on GitHub.
+
+The initial version is still being coded and tested. There are still
+many TODOs and the tests only cover part of the code.

@@ -1,0 +1,18 @@
+[package]
+name = "fanling-interface"
+version = "0.1.0"
+authors = ["martin at starnova <m.e@acm.org>"]
+edition = "2018"
+# build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libc = "0.2.66"
+ansi_term = "0.12.1"
+
+# [build-dependencies]
+# cbindgen = "0.9.1"
+
+[lib]
+crate-type = ["staticlib",'rlib']

@@ -1,0 +1,47 @@
+<!-- show simple -->
+<table width='90%'>
+    <tr>
+        <td colspan=2><span id=message></span></td>
+    </tr>
+    <tr>
+        <th colspan=2><span id=name>{{name|escape}}</span></th>
+    </tr>
+    <tr>
+        <th>Parent:</th>
+        <td><span class=itemlink id="{{-base.parent.link.ident}}" onclick='invoke({ t:"",  i: "{{-
+  base.parent.link.ident|escape -}}", a: "Show"})'>{{- base.parent.descr -}}</span></td>
+    </tr>
+    <tr>
+        <th>Can be parent:</th>
+        <td>{% if base.can_be_parent %} yes {% else %} no {% endif %}</td>
+    </tr>
+    <tr>
+        <th>Can be context:</th>
+        <td>
+          {% if base.can_be_context %} yes {% else %} no {% endif %}</td>
+    </tr>
+    <tr>
+        <th>Sort:</th>
+        <td>{{base.sort|escape}} </td>
+    </tr>
+    <tr>
+        <td colspan=2><span id=text>{{rendered_text|safe}}</span></td>
+    </tr>
+    {% if base.has_children %}<tr>
+    <tr><td colspan=2><h3>Children</h3></td></tr>
+    {%- for child in base.children.entries %}
+     <tr>
+        <td colspan=2><span class=itemlink id="{{- child.link.ident}}" onclick='invoke({ t:"",  i: "{{-
+  child.link.ident|escape -}}", a: "Show"})'>{{- child.descr -}}</span></td>
+    </tr>
+    {% endfor -%}    
+    {% endif %}
+</table>
+
+<input type=button onclick='invoke({ t:"Simple",  i:
+       "{{base.ident|escape}}", a: "Edit"})' value="Edit" />
+<input type=button onclick='invoke({ t:"Simple",  i:
+       "{{base.ident|escape}}", a: "Delete"})' value="Delete" />
+
+<input type=button onclick='invoke({ t:"Simple",  i:
+       "{{base.ident|escape}}", a: {"NewChild": "{{base.ident|escape}}" }})' value="Add simple child" />

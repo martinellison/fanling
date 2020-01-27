@@ -1,0 +1,12 @@
+database_path: testfiles/testdb.db
+repo: testfiles/test.git
+name: martin
+email: m.e@acm.org
+verbose: true
+uniq_pfx: b
+debug: false
+item_dir: items
+repo_branch: test
+auto_link: true
+ssh_path: .ssh/id_rsa
+slurp_ssh: false

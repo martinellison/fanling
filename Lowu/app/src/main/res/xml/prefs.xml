@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory
+        android:summary="Git repository"
+        android:title="Git repository" >
+        <EditTextPreference
+            android:key="path"
+            android:summary="Path to Git repository"
+            android:title="Path" />
+    </PreferenceCategory>
+</PreferenceScreen>

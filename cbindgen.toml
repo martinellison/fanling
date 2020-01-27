@@ -1,0 +1,6 @@
+language = "C"
+style = "type"
+header = "/* Generated file, do not edit */
+
+[parse]
+parse_deps = true

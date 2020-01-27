@@ -1,0 +1,10 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:context="hk.jennyemily.work.lowu.MainActivity">
+
+    <item
+        android:id="@+id/menuSettings"
+        android:orderInCategory="100"
+        android:title="Settings" />
+</menu>

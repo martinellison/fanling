@@ -1,0 +1,15 @@
+database_path: testfiles/test2db.db
+repo: testfiles/test2.git
+name: martin
+email: m.e@acm.org
+verbose: true
+uniq_pfx: b
+debug: false
+item_dir: items
+repo_branch: master
+auto_link: true
+url: git@test.jennyemily.hk:fanling/testrep2.git
+no_write_to_server: false
+auto_link: true
+ssh_path: /home/martin/.ssh/id_rsa
+slurp_ssh: false

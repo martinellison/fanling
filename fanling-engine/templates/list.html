@@ -1,0 +1,15 @@
+<ul>
+  {% for item in items.entries -%}
+  {{- item.level_shift_before|safe -}}
+  <li>
+  {%- if item.is_parent -%}
+  <span class="caret" onclick="onclick_caret(this)"/>
+  {%- endif -%}
+  <span class=itemlink id="{{-item.link.ident}}" onclick='invoke({ t:"",  i: "{{-
+  item.link.ident|escape -}}", a: "Show"})'>{{- item.descr -}}</span>
+  {%- if item.is_parent -%}
+  </span>
+  {%- endif %}
+  {% endfor -%}
+  {{- items.final_adjust_level|safe }}
+</ul>
