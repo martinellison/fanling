@@ -36,6 +36,8 @@ else
         cargo upgrade --all
      #   cargo upgrade --aggressive
     fi
+    echo "restoring old cargo"
+    git checkout $BASE/fanling-engine/Cargo.toml $BASE/taipo-git-control/Cargo.toml
     export PATH=$PATH:$BASE/scripts:$BASE/target/debug
     $BASE/scripts/show-doco.sh &
     
@@ -43,10 +45,10 @@ else
         echo "pulling new cargo files..."
         cargo fetch
     fi
-    # echo "recreating database and getting (and hacking) database schema..."
-    # diesel database reset
-    # SCHEMA=$BASE/fanling-engine/src/search/schema.rs
-    # diesel print-schema >$SCHEMA
-    # sed -i -e "s/item_by_level_copy2/item_by_level/g" $SCHEMA
     $BASE/scripts/db-rebuild.sh 
+
+    qgit&
+    scripts/edit.sh
+    scripts/copy-ssh.sh&
+    cargo fmt
 fi

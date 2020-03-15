@@ -64,6 +64,25 @@
     </tr>
     {% endfor -%}    
     {% endif %}
+    {% if blockedby.has_entries() %}
+    <tr>
+      <th>Blocked by:</th>
+      <td><ul>
+        {% for t in blockedby.entries %}
+        <li>{{t.descr|escape}}</li>
+        {% endfor %}
+      </ul></td>
+    </tr>
+    {% endif %}
+    <tr>
+      <td colspan=2><ul>
+        {% for t in potential_blockers.entries %}
+        <li>{{t.descr|escape}} 
+          <input type=button onclick='invoke({ t:"Task",  i:
+                   "{{base.ident|escape}}", a: {"BlockBy": "{{t.link.ident|escape}}"}})' value="Block from" /></li>
+        {% endfor %}
+      </ul></td>
+    </tr>
 </table>
 
 <input type=button onclick='invoke({ t:"Task",  i:
@@ -73,3 +92,5 @@
 
 <input type=button onclick='invoke({ t:"Task",  i:
        "{{base.ident|escape}}", a: {"NewChild": "{{base.ident|escape}}" }})' value="Add task child" />
+<input type=button onclick='invoke({ t:"Task",  i:
+       "{{base.ident|escape}}", a: "Clone"})' value="Clone" />

@@ -18,7 +18,8 @@
         <th>Parent:</th>
         <td><select id=parent>
                 {% for o in base.parent.entries -%}
-                <option value="{{- o.link.ident -}}" {%if o.selected%}selected{%endif%}>{{o.descr|escape}}</option>
+                <option value="{{- o.link.ident -}}" {% if
+                o.selected%}selected{% endif %}>{{o.descr|escape}}</option>
                 {% endfor %}
             </select></td>
         <td></td>

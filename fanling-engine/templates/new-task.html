@@ -71,6 +71,16 @@
             <textarea name=text id=text rows=10 width='100%' spellcheck=true>{{broken_text|safe}}</textarea>
         </td>
     </tr>
+    {% if blockedby.has_entries() %}
+    <tr>
+      <th>Blocked by:</th>
+      <td><ul>
+        {% for t in blockedby.entries %}
+        <li>{{t.descr|escape}}</li>
+        {% endfor %}
+      </ul></td>
+    </tr>
+    {% endif %}
 </table>
 <input type=button onclick='onclick_task(
        {% if base.has_ident %} "{{- base.ident|escape -}}" {% else %} "" {% endif %},

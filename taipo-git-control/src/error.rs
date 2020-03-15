@@ -69,7 +69,7 @@ macro_rules! dump_error {
                 if !cfg!(android) {
                     panic!("git error");
                 }
-                return Err(repo_error!("bad"));
+                return Err(repo_error!("should not come here"));
             }
         }
     };

@@ -14,12 +14,11 @@ implementation of the `Engine` trait is
 
 Currently, this interface is used by:
 
-* a PC implementation [`fanling10::Fanling10`] 
+* a PC implementation [`fanling10::Fanling10`]
 * an Android implementation using the `fanling_c*interface` crate and the
 `Lowu` Android app.
 */
 
-use ansi_term;
 use std::fmt;
 
 /** trait for an interface between a main program and an engine  */
@@ -40,6 +39,9 @@ pub trait Engine {
     // fn get_value(&self, key: &str) -> String;
     // /** set a callback */
     // fn set_callback(&mut self, cb: fn(js: &str));
+    /** a description identifying the engine for use in diagnostic
+    traces */
+    fn trace_descr(&self) -> String;
 }
 /// [Result] type for this package
 pub type TPResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -50,17 +52,19 @@ pub fn default_response_result() -> ResponseResult {
     trace("getting default response result");
     Ok(Response::default())
 }
-/** the response from the Engine resulting from a command or event */
+/** the response from the Engine to the user interface resulting from a command or event */
 #[derive(Default, Clone, Debug)]
 pub struct Response {
     /** An instruction to, for each pair `(tag, html)`, replace the element identified by `tag` with `html`. The order of the pairs will be significant.  */
     tags: Vec<(String, String)>,
-    // /** */
-    // to_clear: Vec<String>,
     /** set to true to tell the user interface to shut down. The
     engine should have already saved state or whatever it needs to
     do. */
     shutdown_required: bool,
+    /** whether the response includes an error */
+    error: bool,
+    /** assocated ident if any */
+    ident: Option<String>,
 }
 impl Response {
     /**  create a response */
@@ -69,18 +73,26 @@ impl Response {
             tags: vec![],
             //  to_clear: vec![],
             shutdown_required: false,
+            error: false,
+            ident: None,
         }
     }
-    /** */
+    /** tell the user interface to clear any errors from the user's display*/
     pub fn clear_errors(&mut self, errors: Vec<String>) {
         //  self.to_clear = errors.clone();
         for tag in errors {
             self.tags.push((tag.to_owned(), "".to_owned()));
         }
+        self.error = false;
     }
     /** add a tag value pair to the response */
     pub fn add_tag(&mut self, tag: &str, val: &str) {
         self.tags.push((tag.to_owned(), val.to_owned()));
+    }
+    /** convenience method */
+    pub fn add_error_tag(&mut self, tag: &str, val: &str) {
+        self.add_tag(tag, val);
+        self.set_error();
     }
     /** add several tag/value pairs to the response */
     pub fn add_tags(&mut self, tags: &[(&str, &str)]) {
@@ -118,6 +130,22 @@ impl Response {
     pub fn set_shutdown_required(&mut self) {
         self.shutdown_required = true
     }
+    /**  whether the response includes an error */
+    pub fn is_error(&self) -> bool {
+        self.error
+    }
+    /**  set that the response includes an error */
+    pub fn set_error(&mut self) {
+        self.error = true
+    }
+    /**  get associated ident if any */
+    pub fn get_ident(&self) -> Option<String> {
+        self.ident.clone()
+    }
+    /**  set the ident */
+    pub fn set_ident(&mut self, ident: String) {
+        self.ident = Some(ident.to_string())
+    }
 }
 #[derive(Debug)]
 /// another error type
@@ -146,6 +174,8 @@ pub enum CycleEvent {
     Pause,
     /// restore the application with the state saved as at the most recent `Pause` event
     Resume,
+    /// destroy the application
+    Destroy,
     /// stop the application
     Stop,
     /// stop (from the PC interface)

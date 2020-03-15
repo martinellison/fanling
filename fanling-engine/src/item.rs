@@ -7,12 +7,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 use crate::shared::{FLResult, FanlingError, NullResult, Tracer};
 use crate::world::{ActionResponse, World};
 use crate::Action;
-use crate::{fanling_error, fanling_trace};
+use crate::{dump_fanling_error, fanling_error, fanling_trace};
 use ansi_term::Colour;
 use bitfield::{bitfield_bitrange, Bit};
 use chrono::{NaiveDateTime, Utc};
 use serde::{de::Error, Deserializer};
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -87,7 +88,7 @@ impl Item {
         let _naive_date_time = Utc::now().naive_utc();
         Self {
             base: ItemBase::new(item_type),
-            data: data,
+            data,
         }
     }
     /** is the  [`Item`] open? */
@@ -128,6 +129,7 @@ impl Item {
             Action::Edit => self.for_edit(true, world),
             _ => {
                 let res = self.data.do_action(&mut self.base, action, world);
+                trace("persisting change for edit action");
                 world.persist_change(self)?;
                 res
             }
@@ -145,7 +147,7 @@ impl Item {
     pub fn type_name(&self) -> String {
         self.base.item_type.deref().borrow().ident()
     }
-    /** */
+    /** get the item type of the [`Item`] */
     pub fn item_type(&self) -> ItemTypeRef {
         self.base.item_type.clone()
     }
@@ -175,23 +177,23 @@ impl Item {
     pub fn description(&self) -> String {
         self.data.description()
     }
-    // /** a description that can be used in a list */
-    // pub fn description_for_list(&self) -> String {
-    //     self.data.description_for_list()
-    // }
+    /** a description that can be used in a list */
+    pub fn description_for_list(&self) -> String {
+        self.data.description_for_list()
+    }
     /** set the ItemData from a HashMap of values */
     pub fn set_data(&mut self, vals: &HashMap<String, String>, world: &mut World) -> NullResult {
         self.data.set_data(vals, world)
     }
-    /** sends an update request to the item and notiifies the store. */
-    pub fn try_update(
-        &mut self,
-        base: &ItemBaseForSerde,
-        vals: &HashMap<String, String>,
-        world: &mut World,
-    ) -> ActionResponse {
-        self.data.try_update(base, vals, world)
-    }
+    // /**  check that the item would be valid */
+    // pub fn check_valid(
+    //     &mut self,
+    //     base: &ItemBaseForSerde,
+    //     vals: &HashMap<String, String>,
+    //     world: &mut World,
+    // ) -> ActionResponse {
+    //     self.data.check_valid(base, vals, world)
+    // }
     /** link to parent (if any) */
     pub fn parent(&mut self) -> Option<ItemLink> {
         self.base.parent.clone()
@@ -211,13 +213,47 @@ impl Item {
     pub fn set_from_serde(&mut self, base: &ItemBaseForSerde) -> NullResult {
         self.base.set_from_serde(base)
     }
+    /** get the sort key for an item */
     pub fn get_sort(&self) -> String {
         self.base.sort.clone()
     }
-    /** */
+    /** clone an item */
     pub fn clone_from(&mut self, other: &Item) -> NullResult {
         self.base.clone_from(&other.base);
         self.data = other.data.fanling_clone()?;
+        Ok(())
+    }
+    /** assemble an item from a base and data */
+    pub fn from_parts(
+        oib: &ItemBaseForSerde,
+        item_type: ItemTypeRef,
+        os: Box<dyn ItemData>,
+    ) -> FLResult<Self> {
+        let mut ib = ItemBase::new(item_type);
+        ib.set_from_serde(oib)?;
+        Ok(Item { base: ib, data: os })
+    }
+    /** make an item from parts and add it to a change list as modify */
+    pub fn change_using_parts(
+        type_name: &str,
+        ib: &ItemBaseForSerde,
+        os_box: Box<dyn ItemData>,
+        path: &str,
+        changes: &mut ChangeList,
+        world: &mut World,
+    ) -> NullResult {
+        let item_type_rcrc = world.get_item_type(type_name.to_string())?;
+        //  let os_box: Box<ItemData> = Box::new(os);
+        let item = Self::from_parts(ib, item_type_rcrc, os_box)?;
+        let merged_yaml = item.to_yaml()?;
+        let change = taipo_git_control::Change::new(
+            taipo_git_control::ObjectOperation::Modify(
+                String::from_utf8_lossy(&merged_yaml).to_string(),
+            ),
+            path.to_string(),
+            "resolve conflict".to_owned(),
+        );
+        changes.push(change);
         Ok(())
     }
 }
@@ -271,9 +307,9 @@ impl ItemBase {
     pub fn get_classify(&self) -> String {
         self.classify.clone()
     }
-    /** */
+    /** get any 'specials' */
     pub fn get_specials(&self) -> SpecialKinds {
-        (self.special.clone() as SpecialKinds).clone()
+        self.special.clone() as SpecialKinds
     }
     /** whether the item can be a parent */
     pub fn can_be_parent(&self) -> bool {
@@ -302,6 +338,10 @@ impl ItemBase {
         };
         if !base.ident.is_empty() {
             self.ident = base.ident.clone();
+        }
+        match self.ident.chars().next() {
+            None => return Err(fanling_error!("ident should not be empty")),
+            Some(ch0) => assert!(ch0 != '-' && ch0 != '?', "bad ident '{}'", &self.ident),
         }
         self.set_parent(parent);
         //  item_type is already set in make_raw()
@@ -370,6 +410,13 @@ impl ItemBase {
         self.when_modified = other.when_modified;
     }
 }
+
+/** interpret the serialised data as YAML and set the [ItemBase]  */
+pub fn split_data_parts(data: &[u8]) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
+    let serde_value: serde_yaml::Value = dump_fanling_error!(serde_yaml::from_slice(data));
+    let base: ItemBaseForSerde = dump_fanling_error!(serde_yaml::from_value(serde_value.clone()));
+    Ok((base, serde_value))
+}
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 /** All ItemBase fields should be represented here. */
 pub struct ItemBaseForSerde {
@@ -398,10 +445,6 @@ pub struct ItemBaseForSerde {
     #[serde(default = "ItemBaseForSerde::default_classify")]
     #[serde(skip_serializing_if = "ItemBaseForSerde::is_normal")]
     pub classify: String,
-    // /** */
-    // #[serde(default = "SpecialKinds::default_val")]
-    // #[serde(skip_serializing_if = "ItemBaseForSerde::is_default_special_val")]
-    // pub special: u8,
     /** should not be serialised to the repo */
     #[serde(skip)]
     #[serde(default = "ItemBaseForSerde::say_false")]
@@ -442,7 +485,7 @@ impl ItemBaseForSerde {
     }
     /** gets from base */
     pub fn from_base(ib: &ItemBase) -> FLResult<Self> {
-        let parent = ib.parent.clone().map(|ibp| ibp.ident().unwrap());
+        let parent = ib.parent.clone().map(|ibp| ibp.ident().expect("bad???"));
         let naive_date_time = Utc::now().naive_utc();
         trace(&format!("parent is {:?}", &parent));
         Ok(Self {
@@ -547,17 +590,10 @@ pub trait ItemData: Debug {
     fn fanling_clone(&self) -> FLResult<Box<dyn ItemData>>;
     // where
     //     Self: Sized;
-    // /** a description that can be used in a list */
-    // fn description_for_list(&self) -> String;
+    /** a description that can be used in a list */
+    fn description_for_list(&self) -> String;
     /** set the data from a hashmap of values. This can assume that all data is ok, or just return error*/
     fn set_data(&mut self, vals: &HashMap<String, String>, world: &mut World) -> NullResult;
-    /** check whether the Item can be updated using the specified values. It needs to return any errors if any user-supplied value is wrong. */
-    fn try_update(
-        &mut self,
-        base: &ItemBaseForSerde,
-        vals: &HashMap<String, String>,
-        world: &mut World,
-    ) -> ActionResponse;
     /** set the data from YAML data */
     fn set_from_yaml(&mut self, yaml: serde_yaml::Value, world: &mut World) -> NullResult;
     /** do an action */
@@ -589,7 +625,7 @@ impl ItemType {
     /** create a new [ItemType]  */
     pub fn new<'a>(policy: Box<dyn ItemTypePolicy>) -> ItemTypeRef {
         let new_it = Self {
-            policy: policy,
+            policy,
             self_ref: Weak::new(),
         };
         let itr = Rc::new(RefCell::new(new_it));
@@ -610,11 +646,73 @@ impl ItemType {
     }
     /** returns a reference to self */
     fn self_ref(&self) -> ItemTypeRef {
-        self.self_ref.upgrade().unwrap()
+        self.self_ref.upgrade().expect("bad???")
+    }
+    /** check whether the Item can be updated using the specified values. It needs to return any errors if any user-supplied value is wrong.
+     */
+    pub fn check_valid(
+        &mut self,
+        base: &ItemBaseForSerde,
+        vals: &HashMap<String, String>,
+        world: &mut World,
+    ) -> ActionResponse {
+        self.policy.check_valid(base, vals, world)
     }
     /** resolve any conflicts between versions (eg server ls local) */
-    pub fn resolve_conflict(&self, conflict: &Conflict, changes: &mut ChangeList) -> NullResult {
-        self.policy.resolve_conflict(conflict, changes)
+    pub fn resolve_conflict(
+        &self,
+        world: &mut World,
+        conflict: &Conflict,
+        changes: &mut ChangeList,
+    ) -> NullResult {
+        // self.policy.resolve_conflict(world, conflict, changes)
+        trace(&format!("conflict detected {:#?}", &conflict));
+        // for now, do something simple
+        match &conflict.our {
+            None => Ok(()),
+            Some(o) => {
+                let (oib, ov) = split_data_parts(&o.data)?;
+                // let mut os = Simple::new();
+                // os.set_from_yaml_basic(ov)?;
+                match &conflict.their {
+                    None => Ok(()),
+                    Some(t) => {
+                        let (_tib, tv) = split_data_parts(&t.data)?;
+                        match &conflict.ancestor {
+                            None => Ok(()),
+                            Some(a) => {
+                                let (_aib, av) = split_data_parts(&a.data)?;
+                                //     let mut ts = Simple::new();
+                                //     ts.set_from_yaml_basic(tv)?;
+                                //     os.name = merge_strings(&os.name, &ts.name);
+                                //     os.text = merge_strings(&os.text, &ts.text);
+                                //     trace(&format!("merged to {} and {}", os.name, os.text));
+                                //     // let item_type_rcrc = world.get_item_type(oib.type_name.clone())?;
+                                //     //    let item = Item:: from_parts(oib, item_type_rcrc  , Box::new(os));
+                                //     //    let merged_yaml = item.to_yaml()?;
+                                //     //    let change = taipo_git_control::Change::new(
+                                //     //        taipo_git_control::ObjectOperation::Modify(String::from_utf8_lossy(  &merged_yaml).to_string()),
+                                //     //        o.path.clone(),
+                                //     //        "resolve conflict".to_owned(),
+                                //     //    );
+                                //     //    changes.push(change);
+                                // }
+                                let ib = self.policy.resolve_conflict_both(world, av, ov, tv)?;
+                                Item::change_using_parts(
+                                    &oib.type_name,
+                                    &oib,
+                                    ib,
+                                    &o.path,
+                                    changes,
+                                    world,
+                                )?;
+                                Ok(())
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 /** ref counted reference to an [`ItemType`] */
@@ -625,8 +723,29 @@ pub trait ItemTypePolicy: Debug {
     fn kind(&self) -> ItemKind;
     /** make a 'raw' Item of that ItemType */
     fn make_raw(&self, item_type: ItemTypeRef) -> Item;
-    /** generate changes to resolve a merge conflict */
-    fn resolve_conflict(&self, conflict: &Conflict, changes: &mut ChangeList) -> NullResult;
+    // /** generate changes to resolve a merge conflict */
+    // fn resolve_conflict(
+    //     &self,
+    //     world: &mut World,
+    //     conflict: &Conflict,
+    //     changes: &mut ChangeList,
+    // ) -> NullResult;
+    /** generate changes to resolve a merge conflict where both version have the item */
+    fn resolve_conflict_both(
+        &self,
+        world: &mut World,
+        ancestor: Value,
+        ours: Value,
+        theirs: Value,
+    ) -> FLResult<Box<dyn ItemData>>;
+    /** check whether the Item can be updated using the specified values. It needs to return any errors if any user-supplied value is wrong.
+     */
+    fn check_valid(
+        &mut self,
+        base: &ItemBaseForSerde,
+        vals: &HashMap<String, String>,
+        world: &mut World,
+    ) -> ActionResponse;
 }
 /** simple enum, each [`ItemKind`] has an [`ItemType`]*/
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
@@ -706,9 +825,11 @@ pub struct ItemListEntry {
     pub is_parent: bool,
 }
 impl ItemListEntry {
+    /** make the ItemListEntry "special" */
     pub fn set_special(&mut self) {
         self.special = true;
     }
+    /** create a "special" ItemListEntry */
     pub fn make_special(d: &str) -> Self {
         Self {
             descr: d.to_owned(),
@@ -716,13 +837,20 @@ impl ItemListEntry {
             ..Default::default()
         }
     }
+    /** convert from an [`Item`] */
     pub fn from_item(item: &Item) -> FLResult<Self> {
         let il = ItemLink::from(item);
         Ok(Self {
             link: ItemLinkForSerde::from_link(&il)?,
-            descr: item.description(),
+            descr: item.description_for_list(),
             ..Default::default()
         })
+    }
+    /** convert from an [`ItemLink`] */
+    pub fn from_link(link: &mut ItemLink, world: &mut World) -> FLResult<Self> {
+        let item_rcrc = link.resolve_link(world)?;
+        let item = item_rcrc.deref().borrow();
+        Self::from_item(&item)
     }
 }
 impl Default for ItemListEntry {
@@ -785,15 +913,28 @@ impl ItemListEntryList {
         let mut prev_level = 0;
         for ile in self.entries.iter_mut() {
             ile.level_shift_before = if ile.level > prev_level {
-                "<ul class=nested>".repeat((ile.level - prev_level).try_into().unwrap())
+                "<ul class=nested>".repeat((ile.level - prev_level).try_into().expect("bad???"))
             } else if ile.level == prev_level {
                 "".to_owned()
             } else {
-                "</ul>".repeat((prev_level - ile.level).try_into().unwrap())
+                "</ul>".repeat((prev_level - ile.level).try_into().expect("bad???"))
             };
             prev_level = ile.level;
-            self.final_adjust_level = "</ul>".repeat(ile.level.try_into().unwrap());
+            self.final_adjust_level = "</ul>".repeat(ile.level.try_into().expect("bad???"));
         }
+    }
+    /** whether list has any entries */
+    pub fn has_entries(&self) -> bool {
+        !self.entries.is_empty()
+    }
+    /** create from a list of [`ItemLink`]s */
+    pub fn from_links(links: &mut Vec<ItemLink>, world: &mut World) -> Self {
+        Self::from_vec(
+            links
+                .iter_mut()
+                .map(|l| ItemListEntry::from_link(l, world).unwrap())
+                .collect(),
+        )
     }
 }
 /** an identifier (actually a String) */
@@ -874,7 +1015,7 @@ impl ItemLink {
             ItemLinkData::Unresolved(id) => {
                 let ir = world.get_item(id.to_string())?;
                 self.data = ItemLinkData::Resolved(ItemWeakRef::from(&ir));
-                Ok(ir.clone())
+                Ok(ir)
             }
             ItemLinkData::Resolved(ir) => ir.to_rcrc(),
         }
@@ -898,7 +1039,7 @@ impl From<ItemRef> for ItemLink {
 impl From<Ident> for ItemLink {
     /** make an item link from an item */
     fn from(ident: Ident) -> Self {
-        ItemLink::new(ident.to_string())
+        ItemLink::new(ident)
     }
 }
 impl From<&Item> for ItemLink {
@@ -984,11 +1125,11 @@ impl ShowBaseTemplate {
     /** fill in fields */
     pub fn from_base(base: &mut ItemBase, world: &mut World) -> FLResult<Self> {
         let parent = base.parent_for_display(world)?;
-        let children = base.get_item_children(world)?.clone();
-        let has_children = children.entries.len() > 0;
+        let children = base.get_item_children(world)?;
+        let has_children = !children.entries.is_empty();
         Ok(Self {
             ident: base.get_ident(),
-            parent: parent,
+            parent,
             can_be_parent: base.can_be_parent(),
             sort: base.get_sort(),
             children,
@@ -1009,7 +1150,7 @@ mod tests {
     fn item_type_registry() -> crate::shared::NullResult {
         let mut reg = super::ItemTypeRegistry::new();
         let item_type = super::ItemType::new(Box::new(crate::simple::SimpleTypePolicy {}));
-        reg.register(item_type.clone());
+        reg.register(item_type);
         let _item_type2 = reg.get(super::ItemKind::Simple)?;
         // TODO code me:   assert_eq!(item_type.clone().borrow().mark, item_type2.borrow().mark); // make sense?
         Ok(())

@@ -47,8 +47,7 @@ cargo build $BUILDOPT
 if [[ $? != 0 ]]; then exit 1; fi
 #export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.0.33-1.rolling.fc30.x86_64"
 #export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.1.9-2.rolling.fc30.x86_64"
-export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.1.9-2.rolling.fc31.x86_64"
-
+export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.2.8-1.rolling.fc31.x86_64"
 if [[ "$JAVA_HOME" != "" ]] ; then export JAVALOC=$JAVA_HOME ; fi
 if [[ ! -d $JAVALOC ]] ; then echo "java loc wrong" $JAVALOC ; exit 0; fi
 if [[ ! -d $JAVADIR ]] ; then mkdir $JAVADIR ; fi

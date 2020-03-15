@@ -31,7 +31,7 @@ impl Into<ItemListEntry> for DslItem {
     fn into(self) -> ItemListEntry {
         ItemListEntry {
             link: ItemLinkForSerde::new(self.ident.clone()),
-            descr: self.name.clone(),
+            descr: self.name,
             ..ItemListEntry::default()
         }
     }
@@ -78,11 +78,11 @@ sql_function!(fn has_special(skk: Integer, sk: Integer)->Bool);
 pub fn connect_function(conn: &SqliteConnection) {
     has_special::register_impl(&conn, |skk: i32, sk: i32| {
         let mut msk = SpecialKinds::default();
-        let skx: usize = sk.try_into().unwrap();
+        let skx: usize = sk.try_into().expect("bad???");
         msk.set_bit(skx, true);
         (skk & (msk.val() as i32)) != 0
     })
-    .unwrap();
+    .expect("bad???");
 }
 
 // /** find all ready items in the database */

@@ -2,10 +2,53 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
     <PreferenceCategory
         android:summary="Git repository"
-        android:title="Git repository" >
+        android:title="Git repository">
         <EditTextPreference
-            android:key="path"
-            android:summary="Path to Git repository"
-            android:title="Path" />
+            android:key="git_path"
+            android:summary="Path to local repository"
+            android:title="Local git path" />
+        <EditTextPreference
+            android:key="git_branch"
+            android:summary="Branch in local repository"
+            android:title="Git branch" />
+        <CheckBoxPreference
+            android:defaultValue="true"
+            android:key="git_has_url"
+            android:summary="Link to remote repository"
+            android:title="Has remote" />
+        <EditTextPreference
+            android:key="git_url"
+            android:summary="URL of remote repository"
+            android:title="Git URL" />
+        <EditTextPreference
+            android:key="git_name"
+            android:summary="User name for repository"
+            android:title="Git user name" />
+        <EditTextPreference
+            android:key="git_email"
+            android:summary="User email for repository"
+            android:title="Git email" />
+    </PreferenceCategory>
+    <PreferenceCategory
+        android:summary="Other preferences"
+        android:title="Other">
+        <EditTextPreference
+            android:key="database_path"
+            android:summary="Path to database"
+            android:title="Database path" />
+        <EditTextPreference
+            android:defaultValue="a"
+            android:key="unique_prefix"
+            android:summary="Unique prefix"
+            android:title="Prefix" />
+        <EditTextPreference
+            android:key="ssh_path"
+            android:summary="SSH path"
+            android:title="SSH path" />
+        <CheckBoxPreference
+            android:defaultValue="true"
+            android:key="slurp_ssh"
+            android:summary="Slurp SSH"
+            android:title="Slurp SSH" />
     </PreferenceCategory>
 </PreferenceScreen>

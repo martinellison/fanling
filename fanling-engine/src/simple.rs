@@ -6,19 +6,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 /** a simple item, like a wiki page */
 use crate::item::{Item, ItemBase, ItemBaseForSerde, ItemData, NewBaseTemplate, ShowBaseTemplate};
 use crate::markdown;
-use crate::shared::NullResult;
-use crate::shared::{FLResult, FanlingError};
-use crate::world::ActionResponse;
-use crate::world::World;
+use crate::shared::{merge_strings, FLResult, FanlingError, NullResult};
+use crate::world::{ActionResponse, World};
 use ansi_term::Colour;
 use askama::Template;
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 use std::boxed::Box;
 use std::collections::HashMap;
+use std::fmt::Debug;
+
 //#[macro_use]
 use crate::fanling_error;
-use taipo_git_control::ChangeList;
-use taipo_git_control::Conflict;
 
 /** data for a simple item */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +35,11 @@ impl Simple {
             text: "".to_owned(),
         }
     }
+    fn set_from_yaml_basic(&mut self, yaml: serde_yaml::Value) -> NullResult {
+        *self = serde_yaml::from_value(yaml)?;
+        // self.fix_data();
+        Ok(())
+    }
 }
 impl crate::item::ItemData for Simple {
     fn for_edit(
@@ -52,8 +56,9 @@ impl crate::item::ItemData for Simple {
             broken_text,
         };
         let mut resp = fanling_interface::Response::new();
-        resp.clear_errors(vec!["name-error".to_owned()]); // TODO: when?
+        resp.clear_errors(vec!["name-error".to_owned()]);
         resp.add_tag("content", &(nt.render()?));
+        resp.set_ident(base.get_ident());
         trace(&format!("for edit {:?}", &resp));
         Ok(resp)
     }
@@ -91,10 +96,10 @@ impl crate::item::ItemData for Simple {
     fn description(&self) -> String {
         self.name.clone()
     }
-    // /** a description that can be used in a list */
-    // fn description_for_list(&self) -> String {
-    //     self.name.clone()
-    // }
+    /** a description that can be used in a list */
+    fn description_for_list(&self) -> String {
+        self.name.clone()
+    }
     fn set_data(&mut self, vals: &HashMap<String, String>, _world: &mut World) -> NullResult {
         match vals.get("name") {
             Some(s) => self.name = s.to_string(),
@@ -105,20 +110,6 @@ impl crate::item::ItemData for Simple {
             _ => self.text = "".to_owned(),
         }
         Ok(())
-    }
-    fn try_update(
-        &mut self,
-        _base: &ItemBaseForSerde,
-        vals: &HashMap<String, String>,
-        _world: &mut World,
-    ) -> ActionResponse {
-        let mut ar = ActionResponse::new();
-        ar.assert(
-            !vals["name"].is_empty(),
-            "name-error",
-            "Name must be non-blank.",
-        );
-        ar
     }
     fn set_from_yaml(&mut self, yaml: serde_yaml::Value, _world: &mut World) -> NullResult {
         *self = serde_yaml::from_value(yaml)?;
@@ -132,10 +123,8 @@ impl crate::item::ItemData for Simple {
         //    _json_value: serde_json::value::Value,
         _world: &mut World,
     ) -> fanling_interface::ResponseResult {
-        Err(fanling_error!(
-            "simple do action called, should never happen"
-        ))?;
-        Ok(fanling_interface::Response::new())
+        Err(fanling_error!("simple do action called, should never happen").into())
+        //    Ok(fanling_interface::Response::new())
     }
     /** copy from another item data */
     fn fanling_clone(&self) -> FLResult<Box<dyn ItemData>> {
@@ -152,9 +141,26 @@ struct SimpleForSerde {
     #[serde(flatten)]
     data: Simple,
 }
+// impl SimpleForSerde {
+//     /** create a new [`SimpleForSerde`]  */
+//     pub fn new() -> Self {
+//         Self {
+//             name: "".to_owned(),
+//             text: "".to_owned(),
+//         }
+//     }
+//     /** set from YAML data */
+//     //     // /** ensure consistency of the data */
+//     //     // fn fix_data(&mut self) {
+//     //     //     if self.closed {
+//     //     //         self.status = TaskStatus::Closed;
+//     //     //     }
+//     //     //     // TODO project -> parent
+//     //     // }
+// }
 /** template data for creating a new simple item */
 #[derive(Template)]
-#[template(path = "new-simple.html")]
+#[template(path = "new-simple.html", print = "none")]
 struct NewSimpleTemplate<'a> {
     data: &'a Simple,
     base: NewBaseTemplate,
@@ -163,7 +169,7 @@ struct NewSimpleTemplate<'a> {
 
 /** template data for showing a simple item */
 #[derive(Template)]
-#[template(path = "show-simple.html")]
+#[template(path = "show-simple.html", print = "none")]
 struct ShowSimpleTemplate {
     name: String,
     rendered_text: String,
@@ -189,9 +195,34 @@ impl crate::item::ItemTypePolicy for SimpleTypePolicy {
         let item = Item::new_with_data(item_type, Box::new(Simple::new()));
         item
     }
-    fn resolve_conflict(&self, conflict: &Conflict, _changes: &mut ChangeList) -> NullResult {
-        trace(&format!("conflict detected {:#?}", &conflict));
-        unimplemented!() /* TODO resolve_conflict */
+    fn resolve_conflict_both(
+        &self,
+        _world: &mut World,
+        _ancestor: Value,
+        ours: Value,
+        theirs: Value,
+    ) -> FLResult<Box<dyn ItemData>> {
+        let mut os = Simple::new();
+        os.set_from_yaml_basic(ours)?;
+        let mut ts = Simple::new();
+        ts.set_from_yaml_basic(theirs)?;
+        os.name = merge_strings(&os.name, &ts.name);
+        os.text = merge_strings(&os.text, &ts.text);
+        Ok(Box::new(os))
+    }
+    fn check_valid(
+        &mut self,
+        _base: &ItemBaseForSerde,
+        vals: &HashMap<String, String>,
+        _world: &mut World,
+    ) -> ActionResponse {
+        let mut ar = ActionResponse::new();
+        ar.assert(
+            !vals["name"].is_empty(),
+            "name-error",
+            "Name must be non-blank.",
+        );
+        ar
     }
 }
 

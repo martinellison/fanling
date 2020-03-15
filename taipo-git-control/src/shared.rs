@@ -76,11 +76,15 @@ impl RepoOid {
         ro.bytes.clone_from_slice(oid.as_bytes());
         ro
     }
+    /** suitable initial value */
+    pub fn new() -> Self {
+        Self { bytes: [0u8; 20] }
+    }
 }
 impl fmt::Debug for RepoOid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         //    write!(f, "{:x}", &self.bytes.as_hex())
-        write!(f, "{:?}", self.to_oid().unwrap())
+        write!(f, "{:?}", self.to_oid().expect("bad???"))
     }
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -92,17 +96,18 @@ pub(crate) enum StructureStatus {
 }
 
 //#[derive(Debug)]
+#[derive(Clone)]
 /** kind of operation to apply to an object */
 pub enum ObjectOperation {
-    Add(RepoOid),
-    Modify(RepoOid),
+    Add(String),
+    Modify(String),
     Delete,
     Conflict {
         base: Option<RepoOid>,
         ours: Option<RepoOid>,
         theirs: Option<RepoOid>,
     },
-    Fix(RepoOid),
+    Fix(String),
     Unknown,
 }
 
@@ -123,7 +128,7 @@ impl std::fmt::Debug for ObjectOperation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /** a change to an object */
 pub struct Change {
     /// operation to be applied to an item
@@ -137,9 +142,25 @@ impl Change {
     pub fn new(op: ObjectOperation, path: String, descr: String) -> Self {
         Self { op, path, descr }
     }
+    pub fn with_oid(self, oid: RepoOid) -> ChangeWithOid {
+        ChangeWithOid { change: self, oid }
+    }
+}
+// impl<T> Clone for Change {
+//     fn clone(&self) -> Self {
+//         Self {op, path, }
+//     }
+// }
+pub struct ChangeWithOid {
+    // a change
+    pub change: Change,
+    // the repo oid for the string (if any)
+    pub oid: RepoOid,
 }
 /** a set of [`Change`]s */
 pub type ChangeList = Vec<Change>;
+/** a set of [`ChangeWithOid`]s */
+pub type ChangeWithOidList = Vec<ChangeWithOid>;
 
 /** data about an item as retrieved from git */
 #[derive(Debug)]
@@ -169,7 +190,7 @@ impl Drop for Timer {
         trace2(&format!(
             "{} took {}s.",
             self.descr,
-            self.start.elapsed().unwrap().as_millis() as f64 / 1000.0
+            self.start.elapsed().expect("bad???").as_millis() as f64 / 1000.0
         ));
     }
 }

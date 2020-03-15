@@ -8,7 +8,7 @@ use crate::item::{
     NewBaseTemplate, ShowBaseTemplate,
 };
 use crate::markdown;
-use crate::shared::{FLResult, FanlingError, NullResult};
+use crate::shared::{merge_strings, FLResult, FanlingError, NullResult};
 //#[macro_use]
 use crate::fanling_error;
 use crate::world::{ActionResponse, World};
@@ -19,14 +19,15 @@ use chrono::{NaiveDateTime, Utc};
 use log::trace;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::fmt::Debug;
 use std::ops::Deref;
-use taipo_git_control::ChangeList;
-use taipo_git_control::Conflict;
+
 /** possible values for the status field */
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 pub enum TaskStatus {
@@ -51,7 +52,7 @@ impl TaskStatus {
     }
 }
 impl fmt::Display for TaskStatus {
-    /** */
+    /** display to formatter */
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
@@ -68,7 +69,7 @@ pub struct Task {
     name: String,
     /** the text of the page in MarkDown format */
     text: String,
-    /** */
+    /** the context of the task (the conditions for carrying out the task) */
     context: Option<ItemLink>,
     /** status of the task */
     status: TaskStatus,
@@ -77,11 +78,12 @@ pub struct Task {
     /** when the task was closed (if it has been) */
     when_closed: chrono::NaiveDateTime,
     project: String,
-    /** */
+    /** the deadline for completion */
     deadline: chrono::NaiveDateTime,
-    /** */
+    /** only show the task as 'ready' after this date */
     show_after_date: chrono::NaiveDateTime,
-    /** */
+    /** task is blocked by these other tasks, do not show this task as
+    ready until all these tasks are closed */
     blockedby: Vec<ItemLink>,
 }
 impl Task {
@@ -119,8 +121,11 @@ impl Task {
     }
     /** data that can be used to display the context in a template */
     pub fn context_for_display(&mut self, world: &mut World) -> FLResult<ItemListEntry> {
-        // let context_item = world.get_item(self.context)?;
-        let context_item = world.resolve_link(self.context.as_mut().unwrap())?;
+        let context_item = world.resolve_link(
+            self.context
+                .as_mut()
+                .ok_or_else(|| fanling_error!("no context found"))?,
+        )?;
         let context = context_item.deref().borrow();
         Ok(ItemListEntry::from_item(&context)?)
         // let p = self.resolve_context(world)?;
@@ -142,7 +147,7 @@ impl Task {
         };
         trace(&format!("using '{}' for context", context2));
         //   let _context = world.get_item(context2.clone());
-        let context_link: ItemLink = ItemLink::from(context2.clone());
+        let context_link: ItemLink = ItemLink::from(context2);
         trace(&format!(
             "from {:?} made context link {:?}",
             &task.context, &context_link
@@ -197,6 +202,7 @@ impl crate::item::ItemData for Task {
             when_closed: self.when_closed,
             deadline: self.deadline,
             show_after_date: self.show_after_date,
+            blockedby: ItemListEntryList::from_vec(vec![]), /* TODO: code */
         };
         let mut resp = fanling_interface::Response::new();
         resp.clear_errors(vec![
@@ -206,6 +212,7 @@ impl crate::item::ItemData for Task {
             "".to_owned(),
         ]);
         resp.add_tag("content", &(nt.render()?));
+        resp.set_ident(base.get_ident());
         trace(&format!("for edit {:?}", &resp));
         Ok(resp)
     }
@@ -225,6 +232,8 @@ impl crate::item::ItemData for Task {
             when_closed: self.when_closed.format("%Y-%m-%d").to_string(),
             deadline: self.deadline,
             show_after_date: self.show_after_date,
+            blockedby: ItemListEntryList::from_links(&mut self.blockedby, world),
+            potential_blockers: world.search_ready_hier()?,
         };
         let mut resp = fanling_interface::Response::new();
         resp.add_tag("content", &(t.render()?));
@@ -272,10 +281,10 @@ impl crate::item::ItemData for Task {
         parts.push(self.name.clone());
         parts.join("")
     }
-    // /** a description that can be used in a list */
-    // fn description_for_list(&self) -> String {
-    //     self.name.clone()
-    // }
+    /** a description that can be used in a list */
+    fn description_for_list(&self) -> String {
+        self.name.clone()
+    }
     /** this can assume that all data is ok, or just return error */
     fn set_data(&mut self, vals: &HashMap<String, String>, world: &mut World) -> NullResult {
         match vals.get("name") {
@@ -311,37 +320,6 @@ impl crate::item::ItemData for Task {
         };
         Ok(())
     }
-    fn try_update(
-        &mut self,
-        _base: &ItemBaseForSerde,
-        vals: &HashMap<String, String>,
-        _world: &mut World,
-    ) -> ActionResponse {
-        let mut ar = ActionResponse::new();
-        ar.assert(
-            !vals["name"].is_empty(),
-            "name-error",
-            "Name must be non-blank.",
-        );
-        ar.assert(
-            vals["priority"].parse::<i8>().is_ok(),
-            "priority-error",
-            "Priority must be numeric",
-        );
-        /* TODO: validate context */
-        ar.assert(
-            Utc.datetime_from_str(&vals["deadline"], "%F %T").is_ok(),
-            "deadline-error",
-            "Invalid deadline date",
-        );
-        ar.assert(
-            Utc.datetime_from_str(&vals["show_after_date"], "%F %T")
-                .is_ok(),
-            "show-after-date-error",
-            "Invalid show-after date",
-        );
-        ar
-    }
     fn set_from_yaml(&mut self, yaml: serde_yaml::Value, world: &mut World) -> NullResult {
         //    *self = serde_yaml::from_value(yaml)?;
         trace("setting task from yaml...");
@@ -368,21 +346,23 @@ impl crate::item::ItemData for Task {
                 self.reopen(world)?;
                 Ok(self.for_show(base, world)?)
             }
+            crate::Action::BlockBy(_ident) => unimplemented!(),
+            crate::Action::UnblockBy(_ident) => unimplemented!(),
             _ => panic!("invalid action {:?}", action),
         }
     }
-    /** copy from another item data */
+    /** copy from another item data. But status is Open and no blockers. */
     fn fanling_clone(&self) -> FLResult<Box<dyn ItemData>> {
         Ok(Box::new(Self {
             name: self.name.clone(),
             text: self.text.clone(),
-            context: None,
+            context: self.context.clone(),
             priority: self.priority,
             status: TaskStatus::Open,
             when_closed: NaiveDateTime::from_timestamp(0, 0),
             project: self.project.clone(),
-            deadline: NaiveDateTime::from_timestamp(0, 0),
-            show_after_date: NaiveDateTime::from_timestamp(0, 0),
+            deadline: self.deadline,
+            show_after_date: self.show_after_date,
             blockedby: vec![],
         }))
     }
@@ -413,15 +393,15 @@ struct TaskForSerde {
     #[serde(default)]
     #[serde(skip_serializing_if = "std::string::String::is_empty")]
     text: String,
-    /** */
+    /** context of the task */
     //   #[serde(default)]
     context: Ident,
-    /** */
+    /** status of the task e.g. open, closed */
     #[serde(default)]
     #[serde(skip_serializing_if = "TaskStatus::is_default")]
     #[serde(deserialize_with = "TaskStatus::deserialize")]
     status: TaskStatus,
-    /** */
+    /** priority of the task */
     #[serde(default)]
     priority: i8,
     /** when the task was closed (if it has been) */
@@ -432,14 +412,14 @@ struct TaskForSerde {
     #[serde(default)]
     #[serde(skip_serializing_if = "std::string::String::is_empty")]
     project: String,
-    /** */
+    /** deadline for completing the task */
     #[serde(deserialize_with = "ItemBaseForSerde::deserialize")]
     deadline: chrono::NaiveDateTime,
-    /** */
+    /** show the task only after this date */
     #[serde(alias = "showafterdate")]
     #[serde(deserialize_with = "ItemBaseForSerde::deserialize")]
     show_after_date: chrono::NaiveDateTime,
-    /** */
+    /** task is blocked by these tasks */
     #[serde(alias = "waitingon")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -466,11 +446,13 @@ impl Default for TaskForSerde {
     }
 }
 impl TaskForSerde {
+    /** set from YAML data */
     fn set_from_yaml(&mut self, yaml: serde_yaml::Value) -> NullResult {
         *self = serde_yaml::from_value(yaml)?;
         self.fix_data();
         Ok(())
     }
+    /** ensure consistency of the data */
     fn fix_data(&mut self) {
         if self.closed {
             self.status = TaskStatus::Closed;
@@ -484,7 +466,11 @@ impl TryFrom<&Task> for TaskForSerde {
         Ok(Self {
             name: task.name.clone(),
             text: task.text.clone(),
-            context: task.context.as_ref().unwrap().ident()?,
+            context: task
+                .context
+                .as_ref()
+                .ok_or_else(|| fanling_error!("no context found from task"))?
+                .ident()?,
             status: task.status.clone(),
             priority: task.priority.clone(),
             when_closed: task.when_closed,
@@ -494,7 +480,7 @@ impl TryFrom<&Task> for TaskForSerde {
             blockedby: task
                 .blockedby
                 .iter()
-                .map(|il| il.ident().unwrap())
+                .map(|il| il.ident().expect("no ident"))
                 .collect(),
             closed: false,
         })
@@ -513,6 +499,7 @@ struct NewTaskTemplate<'a> {
     pub when_closed: NaiveDateTime,
     pub deadline: chrono::NaiveDateTime,
     pub show_after_date: chrono::NaiveDateTime,
+    pub blockedby: ItemListEntryList,
 }
 
 /** template data for showing a task item */
@@ -529,6 +516,8 @@ struct ShowTaskTemplate {
     pub when_closed: String,
     pub deadline: chrono::NaiveDateTime,
     pub show_after_date: chrono::NaiveDateTime,
+    pub potential_blockers: ItemListEntryList,
+    pub blockedby: ItemListEntryList,
 }
 
 /** policy for the task item type*/
@@ -550,12 +539,56 @@ impl crate::item::ItemTypePolicy for TaskTypePolicy {
         let item = Item::new_with_data(item_type, Box::new(Task::new()));
         item
     }
-    fn resolve_conflict(&self, conflict: &Conflict, _changes: &mut ChangeList) -> NullResult {
-        trace(&format!("conflict detected {:#?}", &conflict));
-        unimplemented!() /* resolve conflict TODO */
+    fn resolve_conflict_both(
+        &self,
+        world: &mut World,
+        _ancestor: Value,
+        ours: Value,
+        theirs: Value,
+    ) -> FLResult<Box<dyn ItemData>> {
+        let mut ots = TaskForSerde::default();
+        ots.set_from_yaml(ours)?;
+        let mut ot = Task::task_from(&mut ots, world)?;
+        let mut tts = TaskForSerde::default();
+        tts.set_from_yaml(theirs)?;
+        let tt = Task::task_from(&mut tts, world)?;
+        ot.name = merge_strings(&ot.name, &tt.name);
+        ot.text = merge_strings(&ot.text, &tt.text);
+        // TODO: other fields
+        Ok(Box::new(ot))
+    }
+    fn check_valid(
+        &mut self,
+        _base: &ItemBaseForSerde,
+        vals: &HashMap<String, String>,
+        _world: &mut World,
+    ) -> ActionResponse {
+        let mut ar = ActionResponse::new();
+        ar.assert(
+            !vals["name"].is_empty(),
+            "name-error",
+            "Name must be non-blank.",
+        );
+        ar.assert(
+            vals["priority"].parse::<i8>().is_ok(),
+            "priority-error",
+            "Priority must be numeric",
+        );
+        /* TODO: validate context */
+        ar.assert(
+            Utc.datetime_from_str(&vals["deadline"], "%F %T").is_ok(),
+            "deadline-error",
+            "Invalid deadline date",
+        );
+        ar.assert(
+            Utc.datetime_from_str(&vals["show_after_date"], "%F %T")
+                .is_ok(),
+            "show-after-date-error",
+            "Invalid show-after date",
+        );
+        ar
     }
 }
-
 /** convenience function for debug traces */
 fn trace(m: &str) {
     trace!("{}", m);

@@ -1,25 +1,26 @@
 [package]
 name = "fanling10"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["martin <m.e@acm.org>"]
 edition = "2018"
 
 [dependencies]
 
-fanling-engine = { path = "../fanling-engine" }
-fanling-interface = { path = "../fanling-interface" }
 ansi_term = "0.12.1"
 askama = "0.9.0"
-rust-embed = "5.2.0"
+askama_shared = "0.9.1"
+config = "0.10.1"
+fanling-engine = { path = "../fanling-engine" }
+fanling-interface = { path = "../fanling-interface" }
+log = "0.4.8"
+quick-error = "1.2.3"
+rust-embed = "5.5.0"
 serde = "1.0.104"
 serde_derive = "1.0.104"
-serde_json = "1.0.44"
-structopt = "0.3.8"
+serde_json = "1.0.48"
+structopt = "0.3.11"
 taipo-git-control = { path = "../taipo-git-control" }
-askama_shared = "0.9.1"
-quick-error = "1.2.3"
-config = "0.10.1"
-log = "0.4.8"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-web-view = "0.6.0"
+#web-view = "0.6.0"
+web-view = { git = "https://github.com/Boscop/web-view" }

@@ -191,7 +191,7 @@ fn rand_text(l: u8) -> String {
     (0..l)
         .map(|_n| {
             let rnum = rand::thread_rng().gen_range(0, IDENT_CHAR.len());
-            IDENT_CHAR.char_indices().nth(rnum).unwrap().1
+            IDENT_CHAR.char_indices().nth(rnum).expect("bad???").1
         })
         .collect()
 }

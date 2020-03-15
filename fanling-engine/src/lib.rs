@@ -2,7 +2,7 @@
 License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/*! 
+/*!
 
 The `fanling_engine` crate implements the engine of the Fanling
 application (the common code across platforms).
@@ -22,7 +22,7 @@ of the Android version.
 
 Most of the functionality of Fanling is contained in the Fanling
 Engine, which is architecture-independent and shared between the
-architecture-specific main programs. 
+architecture-specific main programs.
 
 The Fanling engine implements the [`fanling_interface::Engine`] trait,
 which is used by the platform-specific implementations.
@@ -49,10 +49,10 @@ extern crate diesel_migrations;
 extern crate quick_error;
 extern crate askama;
 extern crate dotenv;
+extern crate fanling_interface;
 extern crate regex;
 extern crate rust_embed;
 pub extern crate taipo_git_control;
-extern crate fanling_interface;
 mod item;
 mod markdown;
 mod search;
@@ -78,6 +78,7 @@ pub enum Action {
     Start,
     Shutdown,
     // SetOptions(Options),
+    Pull,
     PushAndQuit { force: bool },
     Push { force: bool },
     Show,
@@ -97,6 +98,8 @@ pub enum Action {
     Reopen,
     GetAll,
     CheckData,
+    BlockBy(item::Ident),
+    UnblockBy(item::Ident),
 }
 impl Action {
     fn kind(&self) -> ActionKind {
@@ -105,6 +108,7 @@ impl Action {
                 ActionKind::Engine
             }
             Action::Start
+            | Action::Pull
             | Action::Create(_, _)
             | Action::Update(_, _)
 //            | Action::Search
@@ -120,7 +124,8 @@ impl Action {
             | Action::Edit
             | Action::Archive
             | Action::Close
-            | Action::Reopen => ActionKind::Item,
+            | Action::Reopen |  Action::BlockBy(_) |
+    Action::UnblockBy(_)=> ActionKind::Item,
             Action::Unknown => panic!("unknown action"),
         }
     }
@@ -182,13 +187,13 @@ impl BasicRequest {
 /** options for an [Engine]. Some fields are passed down to components. */
 #[derive(Debug)]
 pub struct EngineOptions {
-    /** */
+    /** options for the git system */
     pub repo_options: taipo_git_control::RepoOptions,
-    /** */
+    /** type of user interface (PC or phone) */
     pub interface_type: InterfaceType,
-    /** */
+    /**  options for the search system */
     pub search_options: search::SearchOptions,
-    /** */
+    /**  unique prefix for identifiers (must be different for each ser instance) */
     pub uniq_pfx: String,
     /** automatically generate items for missing items in links */
     pub auto_link: bool,
@@ -249,9 +254,22 @@ impl FanlingEngine {
 }
 impl fanling_interface::Engine for FanlingEngine {
     fn execute(&mut self, body: &str) -> fanling_interface::ResponseResult {
-        fanling_trace!("executing");
+        fanling_trace!(&format!("executing «{}»", &body));
         let now = SystemTime::now();
-        let json_value: serde_json::value::Value = serde_json::from_str(&body)?;
+        let json_result = serde_json::from_str(&body);
+        let json_value: serde_json::value::Value = match json_result {
+            Err(e) => {
+                let re = FanlingError::from(e);
+                re.dump(file!(), line!(), column!());
+                if !cfg!(android) {
+                    panic!("fanling error");
+                } else {
+                    serde_json::value::Value::default()
+                }
+            }
+            Ok(v) => v,
+        };
+        //dump_fanling_error!(serde_json::from_str(&body));
         trace("getting basic request from JSON");
         let basic_request: BasicRequest = serde_json::from_value(json_value.clone())?;
         trace(&format!(
@@ -285,7 +303,8 @@ impl fanling_interface::Engine for FanlingEngine {
                 =>
         Ok(fanling_interface::Response::new()),
             fanling_interface::CycleEvent::Pause => { fanling_trace!("pause event");  trace("pause event");  Ok(fanling_interface::Response::new()) /* TODO  activity events */},
-            fanling_interface::CycleEvent::Resume =>  { fanling_trace!("resume event"); trace("restore event");  Ok(fanling_interface::Response::new()) /* TODO  activity events */},
+            fanling_interface::CycleEvent::Resume =>  { fanling_trace!("resume event"); trace("resume event");  Ok(fanling_interface::Response::new()) /* TODO  activity events */},
+            fanling_interface::CycleEvent::Destroy =>  { fanling_trace!("destroy event"); trace("destroy event");  Ok(fanling_interface::Response::new()) /* TODO  activity events */},
             fanling_interface::CycleEvent::Stop |   fanling_interface::CycleEvent::StopPC =>self.push_and_shutdown(false),  //activity events
         }
     }
@@ -305,6 +324,12 @@ impl fanling_interface::Engine for FanlingEngine {
     // fn set_callback(&mut self, cb: fn(js: &str)) {
     //     self.interface_callback = Some(cb);
     // }
+
+    /** a description identifying the engine for use in diagnostic
+    traces */
+    fn trace_descr(&self) -> String {
+        self.world.trace_descr()
+    }
 }
 impl Drop for FanlingEngine {
     fn drop(&mut self) {

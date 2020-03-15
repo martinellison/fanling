@@ -39,7 +39,7 @@ impl Search {
         let conn = Self {
             connect: SqliteConnection::establish(&path)?,
         };
-        trace(&format!("have sqlite connection, running migrations..."));
+        trace(&"have sqlite connection, running migrations...".to_string());
         embedded_migrations::run_with_output(&conn.connect, &mut std::io::stdout())?;
         trace("connecting function");
         models::connect_function(&conn.connect);
@@ -65,7 +65,7 @@ impl Search {
         let par_id = itemx.parent_ident();
         let mut ss: String = "".to_owned();
         if let Some(s) = par_id.clone() {
-            ss = s.clone();
+            ss = s;
         }
         let parent = match &par_id {
             None => None,

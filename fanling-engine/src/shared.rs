@@ -3,7 +3,28 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /*! shared things that are used in more than one module */
+use difference::{Changeset, Difference};
 use log::trace;
+
+/** merge two strings into one */
+pub fn merge_strings(sa: &str, sb: &str) -> String {
+    let changes = Changeset::new(sa, sb, " ");
+    trace(&format!(
+        "merge text '{}' and '{}' changes {}",
+        sa, sb, changes
+    ));
+    let parts: Vec<String> = changes
+        .diffs
+        .iter()
+        .map(|c| match c {
+            Difference::Same(s) => s.clone(),
+            Difference::Add(s) => s.clone(),
+            Difference::Rem(s) => s.clone(),
+        })
+        .collect();
+    parts.join("")
+}
+
 #[macro_export]
 macro_rules! fanling_error {
     ($msg:expr) => {
@@ -60,6 +81,7 @@ pub enum FanlingError {
     ParseInt(err: std::num::ParseIntError){from() cause(err) description(err.description())}
     DateTime(err: chrono::format::ParseError) {from() cause(err) description(err.description())}
     Var (err: std::env::VarError) {from() cause(err) description(err.description())}
+    Serde(err: serde_json::error::Error) {from() cause(err) description(err.description())}
 } }
 impl FanlingError {
     pub fn new(txt: &str) -> FanlingError {
@@ -142,7 +164,7 @@ pub(crate) fn trace(txt: &str) {
 //             &name
 //         )));
 //     }
-//     let asset_bytes = asset_res.unwrap();
+//     let asset_bytes = asset_res.expect("bad???");
 //     let asset: String = std::str::from_utf8(asset_bytes.as_ref())?.to_string();
 //     Ok(asset.as_str().to_string())
 // }

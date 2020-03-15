@@ -6,8 +6,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 use crate::fanling_error;
 use crate::fanling_trace;
 use crate::item::{
-    Ident, Item, ItemBaseForSerde, ItemKind, ItemLink, ItemListEntryList, ItemRef, ItemType,
-    SpecialKind,
+    split_data_parts, Ident, Item, ItemBaseForSerde, ItemKind, ItemLink, ItemListEntryList,
+    ItemRef, ItemType, SpecialKind,
 };
 use crate::search::Search;
 use crate::shared::{FLResult, FanlingError, NullResult, Tracer};
@@ -31,9 +31,9 @@ pub struct World {
     item_type_registry: crate::item::ItemTypeRegistry,
     /** type of interface that is connected to the engine*/
     interface_type: crate::InterfaceType,
-    /** */
+    /** unique prefix for items created on this instance to ensure that idents aer unique */
     uniq_pfx: String,
-    /** */
+    /** context to use when creating a new task */
     default_context: Option<ItemRef>,
     /** automatically generate items for missing items in links */
     auto_link: bool,
@@ -83,7 +83,7 @@ impl<'a> World {
                 fanling_trace!("loading all items");
                 for entry in self.store.list_all_items()? {
                     // trace(&format!("should load {:?}", entry));
-                    let (base, values) = Store::split_data_parts(entry.blob.as_bytes())?;
+                    let (base, values) = split_data_parts(entry.blob.as_bytes())?;
                     let ident = self.make_known(values, base)?;
                     let path_from_ident = self.store.path_from_ident(&ident);
                     if path_from_ident != entry.path {
@@ -96,23 +96,41 @@ impl<'a> World {
                 Ok(())
             }
             RepoActionRequired::ProcessChanges => {
-                fanling_trace!("fetching");
-                if self.store.has_remote() {
-                    self.store.fetch()?;
-                    let mut merge_outcome = self.store.merge()?;
-                    //    trace(&format!("fetch result was {:?}", merge_outcome,));
-                    match merge_outcome {
-                        MergeOutcome::AlreadyUpToDate => {}
-                        MergeOutcome::Merged | MergeOutcome::Conflict(_) => {
-                            self.store.set_needs_push();
-                            self.handle_merge_outcome(&mut merge_outcome)?;
-                            self.store.commit_merge(&mut merge_outcome)?;
-                        }
-                    }
-                }
-                Ok(())
+                // fanling_trace!("fetching");
+                // if self.store.has_remote() {
+                //     self.store.fetch()?;
+                //     let mut merge_outcome = self.store.merge()?;
+                //     //    trace(&format!("fetch result was {:?}", merge_outcome,));
+                //     match merge_outcome {
+                //         MergeOutcome::AlreadyUpToDate => {}
+                //         MergeOutcome::Merged | MergeOutcome::Conflict(_) => {
+                //             self.store.set_needs_push();
+                //             self.handle_merge_outcome(&mut merge_outcome)?;
+                //             self.store.commit_merge(&mut merge_outcome)?;
+                //         }
+                //     }
+                // }
+                // Ok(())
+                self.pull()
             }
         }
+    }
+    fn pull(&mut self) -> NullResult {
+        fanling_trace!("pulling");
+        if self.store.has_remote() {
+            self.store.fetch()?;
+            let mut merge_outcome = self.store.merge()?;
+            trace(&format!("fetch result was {:?}", merge_outcome,));
+            match merge_outcome {
+                MergeOutcome::AlreadyUpToDate => {}
+                MergeOutcome::Merged(_) | MergeOutcome::Conflict(_) => {
+                    self.store.set_needs_push();
+                    self.handle_merge_outcome(&mut merge_outcome)?;
+                    self.store.commit_merge(&mut merge_outcome)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /** handle the result of the merge */
@@ -124,7 +142,7 @@ impl<'a> World {
             let mut type_name: Option<String> = None;
             let anc = match &conflict.ancestor {
                 Some(ie) => {
-                    let (base, _value) = Store::split_data_parts(&ie.data.as_slice())?;
+                    let (base, _value) = split_data_parts(&ie.data.as_slice())?;
                     type_name = Some(base.type_name.clone());
                     Some(base.clone())
                 }
@@ -132,7 +150,7 @@ impl<'a> World {
             };
             let our = match &conflict.our {
                 Some(ie) => {
-                    let (base, _value) = Store::split_data_parts(&ie.data.as_slice())?;
+                    let (base, _value) = split_data_parts(&ie.data.as_slice())?;
                     type_name = Some(base.type_name.clone());
                     Some(base)
                 }
@@ -140,7 +158,7 @@ impl<'a> World {
             };
             let their = match &conflict.their {
                 Some(ie) => {
-                    let (base, _value) = Store::split_data_parts(&ie.data.as_slice())?;
+                    let (base, _value) = split_data_parts(&ie.data.as_slice())?;
                     type_name = Some(base.type_name.clone());
                     Some(base)
                 }
@@ -164,14 +182,22 @@ impl<'a> World {
                 item_type
                     .deref()
                     .borrow()
-                    .resolve_conflict(&conflict, &mut changes)?;
+                    .resolve_conflict(self, &conflict, &mut changes)?;
             }
         }
         match mo {
-            MergeOutcome::AlreadyUpToDate | MergeOutcome::Merged => {
+            MergeOutcome::AlreadyUpToDate => {
+                // BUG: if merged, need to commit
                 // Err(fanling_error!(&format!("bad merge outcome {:?}", mo)))
-                trace("merge outcome was up to date or merged");
-                fanling_trace!(&format!("merge outcome {:?}, no action required", mo));
+                trace("merge outcome was up to date");
+                fanling_trace!("merge outcome up to date, no action required");
+                Ok(())
+            }
+            MergeOutcome::Merged(_) => {
+                // BUG: if merged, need to commit
+                // Err(fanling_error!(&format!("bad merge outcome {:?}", mo)))
+                trace("merge outcome was merged");
+                fanling_trace!("merge outcome merged, no action required TODO check");
                 Ok(())
             }
             MergeOutcome::Conflict(_) => {
@@ -187,7 +213,7 @@ impl<'a> World {
         let contexts = self.search_contexts()?.entries;
         trace(&format!("contexts are {:?}", &contexts));
         /* FUTURE seemed to be generating default context even when one already exists. This sems to be fixed now, but check. */
-        if contexts.len() == 0 {
+        if contexts.is_empty() {
             self.ensure_some_context()?;
         }
         Ok(())
@@ -195,21 +221,22 @@ impl<'a> World {
     /** ensure there is a context */
     fn ensure_some_context(&mut self) -> NullResult {
         trace("no contexts, so creating one");
-        let type_name = "Simple".to_owned();
-        let base = ItemBaseForSerde {
-            ident: "default_context".to_owned(),
-            type_name: type_name.clone(),
-            can_be_context: true,
-            ..ItemBaseForSerde::default()
-        };
-        let mut vals = HashMap::new();
-        vals.insert("name".to_owned(), "Default context".to_owned());
-        self.default_context = Some(self.make_item(&type_name.clone(), &base, &vals)?);
+        // let type_name = "Simple".to_owned();
+        // let base = ItemBaseForSerde {
+        //     ident: "default_context".to_owned(),
+        //     type_name: type_name.clone(),
+        //     can_be_context: true,
+        //     ..ItemBaseForSerde::default()
+        // };
+        // let mut vals = HashMap::new();
+        // vals.insert("name".to_owned(), "Default context".to_owned());
+        // self.default_context = Some(self.make_item(&type_name, &base, &vals)?);
+        self.default_context = Some(self.ensure_item("default_context".to_owned())?);
         trace("created context.");
         Ok(())
     }
     /** create an item (simple only) */
-    fn ensure_item(&mut self, ident: Ident) -> NullResult {
+    fn ensure_item(&mut self, ident: Ident) -> FLResult<ItemRef> {
         let type_name = "Simple".to_owned();
         let base = ItemBaseForSerde {
             ident: ident.to_owned(),
@@ -218,15 +245,15 @@ impl<'a> World {
             ..ItemBaseForSerde::default()
         };
         let mut vals = HashMap::new();
-        vals.insert("name".to_owned(), ident.to_owned());
-        let _ = self.make_item(&type_name.clone(), &base, &vals)?;
-        Ok(())
+        vals.insert("name".to_owned(), ident);
+        let res = self.make_item(&type_name, &base, &vals)?;
+        Ok(res)
     }
-    /** */
+    /** get the default context */
     pub fn get_default_context(&self) -> ItemRef {
-        self.default_context.clone().unwrap()
+        self.default_context.clone().expect("bad???")
     }
-    /** */
+    /** get the default context for a list */
     pub fn get_default_context_for_list(&self) -> FLResult<ItemLink> {
         match self.default_context.clone() {
             None => Err(fanling_error!("no default context")),
@@ -241,7 +268,7 @@ impl<'a> World {
             _ => panic!(format!("bad type ident: {}", &type_ident)),
         }
     }
-    /** make an [`Item`] */
+    /** make an [`Item`] and add it to the store and search */
     pub fn make_item(
         &mut self,
         type_name: &str,
@@ -258,10 +285,11 @@ impl<'a> World {
         let mut item = item_type.make_raw();
         //  let mut item: Item = ItemType::from(*item_type_rcrc.borrow()).make_raw();
         item.set_data(vals, self)?;
-        item.set_ident(
-            self.store
-                .make_identifier(&self.uniq_pfx, &item.description()),
-        );
+        let descr = item.description();
+        if descr.is_empty() {
+            return Err(fanling_error!("description must not be blank"));
+        }
+        item.set_ident(self.store.make_identifier(&self.uniq_pfx, &descr));
         assert!(item.ident() != "", "ident is null");
         self.search
             .update_last_ident(self.store.get_next_ident_num().try_into()?)?;
@@ -281,28 +309,28 @@ impl<'a> World {
         Ok(self.item_type_registry.get(Self::item_kind(&type_name))?)
         //  Ok(item_type_rf.deref().borrow())
     }
-    /** update an [`Item`] */
-    pub fn update_item(
+    /** check that an item would be valid */
+    pub fn check_item_valid(
         &mut self,
-        ident: Ident,
+        //   ident: Ident,
         item_type_rf: Rc<RefCell<ItemType>>,
         base: &ItemBaseForSerde,
         vals: &HashMap<String, String>,
     ) -> FLResult<ActionResponse> {
-        let _item_type = item_type_rf.deref().borrow();
-        let item = self.get_item(ident)?;
-        let ar = self.try_update(item, base, vals);
+        let mut item_type = item_type_rf.deref().borrow_mut();
+        //    let item = self.get_item(ident)?;
+        let ar = item_type.check_valid(base, vals, self);
         Ok(ar)
     }
-    /** sends an update request to the item and notiifies the store. */
-    fn try_update(
-        &mut self,
-        item: ItemRef,
-        base: &ItemBaseForSerde,
-        vals: &HashMap<String, String>,
-    ) -> ActionResponse {
-        item.deref().borrow_mut().try_update(base, vals, self)
-    }
+    // /** check that an item would be valid */
+    // fn check_valid(
+    //     &mut self,
+    //     item: ItemRef,
+    //     base: &ItemBaseForSerde,
+    //     vals: &HashMap<String, String>,
+    // ) -> ActionResponse {
+    //     item.deref().borrow_mut().check_valid(base, vals, self)
+    // }
     /** carry out an action and return a [`Response`]. May delegate the action to a component. */
     pub fn do_action(
         &mut self,
@@ -333,7 +361,7 @@ impl<'a> World {
         match self.store.get_item_if_known(&ident) {
             Some(i) => Ok(i.clone()),
             None => {
-                if self.auto_link && !(self.store.has_file(&ident).unwrap()) {
+                if self.auto_link && !(self.store.has_file(&ident).expect("bad???")) {
                     self.ensure_item(ident.clone())?;
                 }
                 let (base, serde_value) = self.store.get_item_parts(&ident)?;
@@ -357,7 +385,7 @@ impl<'a> World {
         // item_ref.deref().borrow_mut().set_from_serde(&base, self)?;
         // Ok(item_ref)
     }
-    /** */
+    /** make an item and set its fields  */
     pub fn make_and_populate_item(
         &mut self,
         item_type: &ItemType,
@@ -403,8 +431,17 @@ impl<'a> World {
         match &basic_request.action {
             crate::Action::Start => Ok(fanling_interface::Response::new()),
             crate::Action::Create(base, vals) => {
-                let item_ref =
-                    self.make_item(&(basic_request.ensure_type_name()?), &base, &vals)?;
+                let type_name = basic_request.ensure_type_name()?;
+                let item_type_rf = self.get_item_type(type_name.clone())?;
+                let action_result = self.check_item_valid(item_type_rf, base, vals)?;
+                if let ActionResponse::Failure {
+                    messages: _,
+                    specifics: _,
+                } = action_result
+                {
+                    return action_result.to_response();
+                }
+                let item_ref = self.make_item(&type_name, &base, &vals)?;
                 let res = item_ref.deref().borrow_mut().for_edit(true, self);
                 res
             }
@@ -425,8 +462,18 @@ impl<'a> World {
                 //   trace(&format!("ready list {:?}", &resp));
                 Ok(resp)
             }
+            crate::Action::Pull => {
+                trace("doing pull action");
+                self.pull()?;
+                Ok(fanling_interface::Response::new())
+            }
             crate::Action::Push { force } => {
+                trace("doing push action");
                 self.store.push(*force)?;
+                trace(&format!(
+                    "after push, needs push: {:?}",
+                    self.store.get_needs_push()
+                ));
                 Ok(fanling_interface::Response::new())
             }
             crate::Action::New => {
@@ -462,11 +509,10 @@ impl<'a> World {
         base: &ItemBaseForSerde,
         vals: &HashMap<String, String>,
     ) -> fanling_interface::ResponseResult {
-        let ident: Ident = basic_request.ensure_ident()?.to_string();
+        let ident: Ident = basic_request.ensure_ident()?;
         let type_name = basic_request.ensure_type_name()?;
         let item_type_rf = self.get_item_type(type_name)?;
-        let action_result =
-            self.update_item(ident.to_string(), item_type_rf.clone(), base, vals)?;
+        let action_result = self.check_item_valid(item_type_rf, base, vals)?;
         trace(&format!("action result is {:#?}", action_result));
         if action_result.ok() {
             let item_rf = self.get_item(ident)?;
@@ -475,8 +521,9 @@ impl<'a> World {
             item.set_from_serde(base)?;
             trace(&format!("values for data update: {:#?}", vals));
             item.set_data(vals, self)?;
-            // self.search.update_item(&mut item)?;
+            // self.search.check_item_valid(&mut item)?;
             // self.store.mark_item_modified(&mut item)?;
+            trace("persisting change for ok update action");
             self.persist_change(&mut item)?;
         }
         Ok(action_result.to_response()?)
@@ -486,7 +533,7 @@ impl<'a> World {
         &mut self,
         basic_request: &crate::BasicRequest,
     ) -> fanling_interface::ResponseResult {
-        let existing_ident: Ident = basic_request.ensure_ident()?.to_string();
+        let existing_ident: Ident = basic_request.ensure_ident()?;
         let existing_item_rf = self.get_item(existing_ident)?;
         let existing_item = existing_item_rf.deref().borrow_mut();
         let item_type_rf = existing_item.item_type();
@@ -503,10 +550,12 @@ impl<'a> World {
         let item_rcrc = Rc::new(RefCell::new(item));
         self.store.add_item(&item_rcrc)?;
         self.search.add_item(&item_rcrc)?;
-        unimplemented!() // TODO clone item
+        let mut item_ref = item_rcrc.deref().borrow_mut();
+        Ok(item_ref.for_edit(true, self)?)
     }
     /** write out any changes to the search database and the store */
     pub fn persist_change(&mut self, item: &mut Item) -> NullResult {
+        trace(&format!("persisting change for '{}'", item.ident()));
         self.search.update_item(item)?;
         self.store.mark_item_modified(item)?;
         Ok(())
@@ -516,13 +565,13 @@ impl<'a> World {
         &mut self,
         basic_request: &crate::BasicRequest,
     ) -> fanling_interface::ResponseResult {
-        let ident: Ident = basic_request.ensure_ident()?.to_string();
+        let ident: Ident = basic_request.ensure_ident()?;
         let type_name = basic_request.ensure_type_name()?;
         let _item_type_rf = self.get_item_type(type_name)?;
         // TODO check whether item can be deleted
         let item_rf = self.get_item(ident)?;
         self.search.delete_item(item_rf.clone())?;
-        self.store.mark_item_deleted(item_rf.clone())?;
+        self.store.mark_item_deleted(item_rf)?;
         Ok(fanling_interface::Response::new())
     }
     /** process all items in the store */
@@ -577,7 +626,7 @@ impl<'a> World {
         trace("got items into store");
         Ok(fanling_interface::Response::new())
     }
-    /** */
+    /** add the item to the search engine */
     fn make_known(
         &mut self,
         serde_value: serde_yaml::Value,
@@ -599,6 +648,10 @@ impl<'a> World {
     /** search contexts  */
     pub fn search_contexts(&self) -> FLResult<ItemListEntryList> {
         Ok(self.search.search_special(SpecialKind::Context)?)
+    }
+    /** search everything for ready with hierarchy */
+    pub fn search_ready_hier(&self) -> FLResult<ItemListEntryList> {
+        self.search.search_ready_hier()
     }
     /** cross-check search and store */
     fn check_data(&self) -> fanling_interface::ResponseResult {
@@ -666,9 +719,26 @@ impl<'a> World {
     pub fn push(&mut self, force: bool) -> NullResult {
         self.store.push(force)
     }
-    /** */
+    /** find all the children of this item that have ready status */
     pub fn search_ready_children(&self, ident: &str) -> FLResult<ItemListEntryList> {
         self.search.search_ready_children(ident)
+    }
+    /** get an item if it is already known. (This can be used to check whether an item is known). */
+    pub fn get_item_if_known(&self, ident: &Ident) -> Option<&ItemRef> {
+        self.store.get_item_if_known(ident)
+    }
+    /** a description identifying the engine for use in diagnostic
+    traces */
+    pub fn trace_descr(&self) -> String {
+        self.store.trace_descr()
+    }
+    /** separate out an item (specified by ident) into (type-independent) base and (type-dependent) values */
+    pub fn get_item_parts(
+        &self,
+        ident: &String,
+    ) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
+        let (base, values) = self.store.get_item_parts(ident)?;
+        Ok((base, values))
     }
 }
 /** template data for a list of items */
@@ -693,17 +763,20 @@ pub enum ActionResponse {
         /** specific messages */
         specifics: Vec<(String, String)>,
     },
-    Success,
+    Success {
+        /** identifier if created by the action*/
+        ident: Option<Ident>,
+    },
 }
 impl ActionResponse {
     /** create a new `ActionResponse` */
     pub fn new() -> Self {
-        Self::Success
+        Self::Success { ident: None }
     }
     /** record that a user error has been found */
     pub fn add_error(&mut self, area: &str, m: &str) {
         match self {
-            Self::Success => {
+            Self::Success { ident: _ } => {
                 let mut ss = Vec::new();
                 ss.push((area.to_owned(), m.to_owned()));
                 *self = Self::Failure {
@@ -728,12 +801,12 @@ impl ActionResponse {
     }
     /** whether there has been no errors */
     pub fn ok(&self) -> bool {
-        *self == Self::Success
+        *self == Self::Success { ident: None }
     }
     /** user errors */
     pub fn errors(&self) -> Vec<(String, String)> {
         match self {
-            Self::Success => vec![],
+            Self::Success { ident: _ } => vec![],
             Self::Failure {
                 messages: _,
                 specifics,
@@ -743,7 +816,7 @@ impl ActionResponse {
     /** overall user error message */
     pub fn overall_message(&self) -> String {
         match self {
-            Self::Success => "".to_owned(),
+            Self::Success { ident: _ } => "".to_owned(),
             Self::Failure {
                 messages,
                 specifics: _,
@@ -751,13 +824,37 @@ impl ActionResponse {
         }
     }
     fn to_response(&self) -> fanling_interface::ResponseResult {
-        // TODO clear old messages
         let mut response =
             fanling_interface::Response::new_with_tags(&[("message", &self.overall_message())]);
         for (t, v) in self.errors() {
             response.add_tag(&t, &v);
         }
+        if let Some(id) = self.ident() {
+            response.set_ident(id);
+        }
         Ok(response)
+    }
+    /** associate an [`Ident`] */
+    pub fn set_ident(&mut self, new_ident: &Ident) {
+        match self {
+            Self::Success { ident: id } => {
+                *id = Some(new_ident.to_owned());
+            }
+            Self::Failure {
+                messages: _,
+                specifics: _,
+            } => {}
+        }
+    }
+    /** retrieve the  [`Ident`] */
+    pub fn ident(&self) -> Option<Ident> {
+        match self {
+            Self::Success { ident } => ident.clone(),
+            Self::Failure {
+                messages: _,
+                specifics: _,
+            } => None,
+        }
     }
 }
 

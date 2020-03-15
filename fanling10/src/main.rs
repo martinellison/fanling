@@ -44,11 +44,11 @@ use ansi_term::Colour::*;
 use ansi_term::Style;
 //use log::trace;
 
+use fanling_interface::Engine;
 use std::path::PathBuf;
 use std::thread;
 use std::time::SystemTime;
 use structopt::StructOpt;
-use fanling_interface::Engine;
 #[cfg(not(target_os = "android"))]
 use web_view::*;
 #[macro_use]

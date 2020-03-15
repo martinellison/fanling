@@ -6,8 +6,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 use crate::error::{NullResult, RepoError, RepoResult};
 //#[macro_use]
 use crate::shared::{
-    trace, Change, ChangeList, EntryDescr, ObjectOperation, RepoOid, RepoOptions, StructureStatus,
-    Timer, Tracer,
+    trace, ChangeList, ChangeWithOid, ChangeWithOidList, EntryDescr, ObjectOperation, RepoOid,
+    RepoOptions, StructureStatus, Timer, Tracer,
 };
 use crate::{repo_timer, repo_trace};
 use git2::{build::RepoBuilder, *};
@@ -19,6 +19,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str;
 //use std::time::Duration;
+use std::thread;
 use std::time::SystemTime;
 
 /** whether any further action is required on a newly-opened repo */
@@ -90,7 +91,7 @@ impl FanlingRepository {
     fn init(opts: &RepoOptions) -> RepoResult<FanlingRepository> {
         let path = opts.path.clone();
         repo_timer!(&format!("init repo {:?}", path));
-        let r = dump_error!(Repository::init(path));
+        let r = dump_error!(Repository::init_bare(path));
         Ok(Self::new(r, opts)?)
     }
     /** open an existing repository */
@@ -112,10 +113,10 @@ impl FanlingRepository {
                 .to_owned(),
             opts.slurp_ssh,
             &mut cb,
-        );
+        )?;
         fetch_options.remote_callbacks(cb);
         let mut builder = RepoBuilder::new();
-        builder.bare(true);
+        builder.bare(false);
         builder.fetch_options(fetch_options);
         let url = opts
             .url
@@ -217,8 +218,11 @@ impl FanlingRepository {
     /** switch to correct branch */
     fn switch_to_branch(&self) -> NullResult {
         repo_trace!("switching to branch");
-        for r in self.repo.references().unwrap().names() {
-            trace(&format!("branch could be: {}", r.unwrap()));
+        for r in self.repo.references().expect("bad reference").names() {
+            trace(&format!(
+                "branch could be: {}",
+                r.expect("bad reference name")
+            ));
         }
         Ok(dump_error!(self.repo.set_head(&self.refname())))
     }
@@ -320,7 +324,7 @@ impl FanlingRepository {
         repo_trace!("create structure");
         let sub_tree_oid = {
             repo_trace!("create sub tree");
-            let sub_tree_builder = self.treebuilder_with_readme(None, "Items go here", "a")?; // error here: expected itembaseforserde
+            let sub_tree_builder = self.treebuilder_with_readme(None, "Items go here", "a")?;
             dump_error!(sub_tree_builder.write())
         };
         let sub_dir_name = &self.item_dir.clone();
@@ -453,7 +457,9 @@ impl FanlingRepository {
         let tree = self.get_latest_tree()?;
         //  trace(&format!("latest tree has {} entries", tree.len()));
         Self::describe_tree(&tree, "epo_has_file:latest");
-        let subtree = self.try_get_subtree(tree)?.unwrap();
+        let subtree = self
+            .try_get_subtree(tree)?
+            .ok_or_else(|| repo_error!("no subtree"))?;
         //   trace(&format!("subtree has {} entries", subtree.len()));
         Self::describe_tree(&subtree, "epo_has_file:subtree");
         Ok(self.has_file(subtree, path))
@@ -499,7 +505,15 @@ impl FanlingRepository {
     /** set that the repo needs to be pushed (only if there us a remote to push to) */
     pub fn set_needs_push(&mut self) {
         if self.url.is_some() && self.write_to_server {
+            trace("setting needs push");
             self.needs_push = true;
+        } else {
+            // debug
+            trace(&format!(
+                "not setting push because: has url {:?}, writing to server {:?}",
+                self.url.is_some(),
+                self.write_to_server
+            ));
         }
     }
     /** whether repo needs to push */
@@ -520,7 +534,7 @@ impl FanlingRepository {
                 .to_owned(),
             self.slurp_ssh,
             &mut cb,
-        );
+        )?;
         fetch_options.remote_callbacks(cb);
         let mut remote = dump_error!(self.repo.find_remote(&self.required_remote));
         trace(&format!("fetching (branch: {})...", &self.required_branch));
@@ -530,23 +544,31 @@ impl FanlingRepository {
     }
     /** merge the versions and determine the status (no change/fast forward/conflict) */
     pub fn merge(&mut self) -> RepoResult<MergeOutcome> {
+        repo_trace!("merge");
         let our_commit = self.our_commit()?;
         let their_commit = self.their_commit()?;
+        trace(&format!(
+            "commits ours {} theirs {}",
+            our_commit.id(),
+            their_commit.id()
+        ));
         if our_commit.id() == their_commit.id() {
             trace("commits are the same, not merging");
             return Ok(MergeOutcome::AlreadyUpToDate);
         }
         // TODO: maybe use merge analysis
         trace("commits different, so merging and finding conflicts...");
-        let index =
-            self.repo
-                .merge_commits(&our_commit, &their_commit, Some(&MergeOptions::new()))?;
+        let index = dump_error!(self.repo.merge_commits(
+            &our_commit,
+            &their_commit,
+            Some(&MergeOptions::new())
+        ));
         if index.has_conflicts() {
             trace("merge conflicts exist");
             self.dump_conflicts(&index)?;
             return Ok(MergeOutcome::Conflict(index));
         }
-        Ok(MergeOutcome::Merged)
+        Ok(MergeOutcome::Merged(index))
     }
     // /** index of merge after fetch */
     // pub fn merge_index(&self, our_commit: Oid, their_commit: Oid) -> NullResult {
@@ -556,21 +578,25 @@ impl FanlingRepository {
     //         .merge_commits(&ours, &theirs, Some(&MergeOptions::new()))?;
     //     Ok(())
     // }
-    /** apply a change list to an index (to resolve conflicts) */
+    /** apply a change list to an index (to resolve conflicts)
+
+    See
+    [index format](https://github.com/git/git/blob/master/Documentation/technical/index-format.txt)
+    for the details of the git index entry format.*/
     pub fn apply_changelist_to_index(&self, changes: &ChangeList, index: &mut Index) -> NullResult {
         for change in changes {
             trace(&format!("applying operation {:?}", change.op));
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+            let now = dump_error!(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH));
             let index_time_now = IndexTime::new(now.as_secs().try_into()?, now.subsec_nanos());
             match &change.op {
-                ObjectOperation::Add(o) | ObjectOperation::Modify(o) => {
-                    let data = self.repo.find_blob(o.to_oid()?)?;
+                ObjectOperation::Add(data) | ObjectOperation::Modify(data) => {
+                    //                    let data = self.repo.find_blob(o.to_oid()?)?;
                     let entry = IndexEntry {
                         ctime: index_time_now,
                         mtime: index_time_now,
                         dev: 0,
                         ino: 0,
-                        mode: 0,
+                        mode: 0o100644, // regular file
                         uid: 0,
                         gid: 0,
                         file_size: 0,
@@ -579,10 +605,11 @@ impl FanlingRepository {
                         flags_extended: 0,
                         path: change.path.clone().into_bytes(), //?? does path include "items/"?
                     };
-                    index.add_frombuffer(&entry, data.content())?;
+                    //   trace(&format!("entry ", &entry));
+                    dump_error!(index.add_frombuffer(&entry, data.as_bytes()));
                 }
                 ObjectOperation::Delete => {
-                    index.remove_path(&PathBuf::from(change.path.clone()))?;
+                    dump_error!(index.remove_path(&PathBuf::from(change.path.clone())));
                 }
                 _ => return Err(repo_error!("invalid operation")),
             }
@@ -595,14 +622,15 @@ impl FanlingRepository {
         changes: &ChangeList,
         mo: &mut MergeOutcome,
     ) -> NullResult {
-        if let MergeOutcome::Conflict(c) = mo {
+        if let MergeOutcome::Conflict(index) = mo {
             trace(&format!(
                 "merge outcome had conflict, applying {} changes to index",
                 changes.len()
             ));
-            self.apply_changelist_to_index(changes, c)
+            self.repo.set_index(index);
+            self.apply_changelist_to_index(changes, index)
         } else {
-            Err(repo_error!("should not come here"))
+            Err(repo_error!("should not come here: should be conflict"))
         }
     }
     /** Apply commit after merge */
@@ -613,18 +641,34 @@ impl FanlingRepository {
                                // parent_commits: &[&Commit]
     ) -> RepoResult<Option<Oid>> {
         match mo {
-            MergeOutcome::AlreadyUpToDate | MergeOutcome::Merged => {
-                repo_trace!(&format!("merge outcome {:?}, no commit required", mo));
+            MergeOutcome::AlreadyUpToDate => {
+                repo_trace!("merge outcome already up to date, no commit required");
                 Ok(None)
+            }
+            MergeOutcome::Merged(ix) => {
+                repo_trace!("merge outcome merged, commit required");
+                //   Ok(None)
+                let our_commit = self.our_commit()?;
+                let their_commit = self.their_commit()?;
+                let new_tree_oid = dump_error!(ix.write_tree_to(&self.repo));
+                let new_tree = dump_error!(self.repo.find_tree(new_tree_oid));
+                //  trace(&format!("new tree has {} entries", new_tree.len()));
+                Self::describe_tree(&new_tree, "commit_merge: merged");
+                let message = "merge after fetch (merged)";
+                Ok(Some(self.write_commit(
+                    new_tree,
+                    message,
+                    &[&our_commit, &their_commit],
+                )?))
             }
             MergeOutcome::Conflict(ix) => {
                 let our_commit = self.our_commit()?;
                 let their_commit = self.their_commit()?;
-                let new_tree_oid = ix.write_tree()?;
-                let new_tree = self.repo.find_tree(new_tree_oid)?;
+                let new_tree_oid = dump_error!(ix.write_tree_to(&self.repo));
+                let new_tree = dump_error!(self.repo.find_tree(new_tree_oid));
                 //  trace(&format!("new tree has {} entries", new_tree.len()));
-                Self::describe_tree(&new_tree, "commit_merg:new");
-                let message = "merge after fetch";
+                Self::describe_tree(&new_tree, "commit_merge: conflict");
+                let message = "merge after fetch (conflict)";
                 Ok(Some(self.write_commit(
                     new_tree,
                     message,
@@ -637,31 +681,41 @@ impl FanlingRepository {
     fn dump_conflicts(&self, index: &Index) -> NullResult {
         trace(&format!(
             "index has {} conflicts",
-            index.conflicts()?.count()
+            dump_error!(index.conflicts()).count()
         ));
-        let desc_opts = DescribeOptions::new();
-        for ic in index.conflicts()? {
-            let icc = &(ic?);
+        let mut desc_opts = DescribeOptions::new();
+        desc_opts.show_commit_oid_as_fallback(true);
+        for ic in dump_error!(index.conflicts()) {
+            let icc = &(dump_error!(ic));
+            //   trace(&format!("index conflict {:#?}", &icc));
+            trace("conflict found");
             if let Some(a) = &icc.ancestor {
-                let o = self.repo.find_object(a.id, None)?;
-                trace(&format!(
-                    "ancestor {:?} ",
-                    o.describe(&desc_opts)?.format(None)
-                ));
+                let o = dump_error!(self.repo.find_object(a.id, None));
+                trace(&format!("ancestor {:?} ", describe_git_object(&o)));
+            //     dump_error!(o.describe(&desc_opts)).format(None)
+            // ));
+            } else {
+                trace("no ancestor");
             }
             if let Some(o) = &icc.our {
                 let o = dump_error!(self.repo.find_object(o.id, None));
-                trace(&format!("ours {:?} ", o.describe(&desc_opts)?.format(None)));
+                trace(&format!("ours {:?} ", describe_git_object(&o)));
+            //  dump_error!(o.describe(&desc_opts)).format(None)
+            // ));
+            } else {
+                trace("no ours");
             }
             if let Some(t) = &icc.their {
                 let o = dump_error!(self.repo.find_object(t.id, None));
-                trace(&format!(
-                    "theirs {:?} ",
-                    o.describe(&desc_opts)?.format(None)
-                ));
+                trace(&format!("theirs {:?} ", describe_git_object(&o)));
+            //     dump_error!(o.describe(&desc_opts)).format(None)
+            // ));
+            } else {
+                trace("no theirs");
             }
-            trace(" conflict");
+            trace("conflict");
         }
+        trace("conflicts listed");
         Ok(())
     }
     /** push changes to remote (push the local repo to a server) */
@@ -672,6 +726,7 @@ impl FanlingRepository {
         trace("preparing to push...");
         repo_timer!("push repo");
         {
+            repo_trace!("pushing to remote");
             let mut remote: Remote = match self.try_get_remote() {
                 Ok(r) => r,
                 Err(_) => return Err(repo_error!("no remote")),
@@ -686,7 +741,7 @@ impl FanlingRepository {
                     .to_owned(),
                 self.slurp_ssh,
                 &mut cb,
-            );
+            )?;
             trace("connecting...");
             remote.connect_auth(Direction::Push, Some(cb), None)?;
             trace("connected, preparing...");
@@ -700,7 +755,7 @@ impl FanlingRepository {
                     .to_owned(),
                 self.slurp_ssh,
                 &mut cb,
-            );
+            )?;
             let mut push_options = PushOptions::new();
             push_options.remote_callbacks(cb);
             trace("pushing...");
@@ -710,18 +765,24 @@ impl FanlingRepository {
             );
             let refspec = (if force { "+" } else { "" }).to_owned() + &base_refspec;
             remote.push(&[refspec.as_str()], Some(&mut push_options))?;
+            //     self.needs_push = false;
         }
+        trace("after push, clearing needs push...");
         self.needs_push = false;
         Ok(())
     }
     /** set the remote callbacks for a repo access. In particular, set up the SSL credentials to access the repo. */
-    fn set_remote_callbacks(ssh_path: &String, slurp_ssh: bool, cb: &mut RemoteCallbacks) {
+    fn set_remote_callbacks(
+        ssh_path: &String,
+        slurp_ssh: bool,
+        cb: &mut RemoteCallbacks,
+    ) -> NullResult {
         trace(&format!(
             "setting remote credentials, path {}, {}",
             ssh_path,
             if slurp_ssh { "SLURP" } else { "NO SLURP" }
         ));
-        let git_config = git2::Config::open_default().unwrap();
+        let git_config = git2::Config::open_default()?;
         let mut ch = CredentialHandler::new(git_config);
         let mut try_count: i8 = 0;
         const MAX_TRIES: i8 = 5;
@@ -742,12 +803,6 @@ impl FanlingRepository {
                 let privatekey = Path::new(&copy2);
                 let copy3 = ssh_path_copy.clone();
                 let publickey = PathBuf::from(format!("{}.pub", copy3));
-                // publickey.push("pub");
-                // trace(&format!(
-                //     "want ssh key, returning ({:?}) for {}...",
-                //     ssh_path_copy, username
-                // ));
-                //  let path = Self::ssh_path(&ssh_path_copy).expect("no path to SSH");
                 trace(&format!(
                     "no slurp: username is {}, public is {:?}, private is {:?}",
                     &username, &publickey, &privatekey
@@ -761,10 +816,6 @@ impl FanlingRepository {
                 let publickey = slurp::read_all_to_string(publickey_fn).expect("bad key file");
                 let privatekey_fn = ssh_path_copy.clone();
                 let privatekey = slurp::read_all_to_string(privatekey_fn).expect("bad key file");
-                // trace(&format!(
-                //     "slurp: username is {}, public is {:?}, private is {:?}",
-                //     &username, &publickey, &privatekey
-                // ));
                 let cred = Cred::ssh_key_from_memory(username, Some(&publickey), &privatekey, None);
                 return cred;
             }
@@ -776,6 +827,7 @@ impl FanlingRepository {
             }
             ch.try_next_credential(url, username, allowed)
         });
+        Ok(())
     }
     // /** Get a path to SSL credentials. */
     // fn ssh_path(file_name: &str) -> Result<PathBuf, RepoError> {
@@ -788,15 +840,13 @@ impl FanlingRepository {
     // }
 
     /** apply a set of changes and commit them
-
-    See
-    [index format](https://github.com/git/git/blob/master/Documentation/technical/index-format.txt)
-    for the details of the git index entry format. */
+     */
     pub fn apply_changes(&mut self, changes: &ChangeList) -> NullResult {
         repo_timer!("applying changes");
         // // let now = SystemTime::now();
         // // trace(&format!("applying {} changes", changes.len()));
-        self.actually_do_changes(changes)?;
+        let changes_with_ords = self.add_oids_to_changelist(changes.to_vec());
+        self.actually_do_changes(&changes_with_ords)?;
         trace("setting needs change...");
         self.set_needs_push();
         // trace2(&format!(
@@ -815,13 +865,14 @@ impl FanlingRepository {
     pub fn blob_from_path(&self, path: &str) -> Result<Vec<u8>, RepoError> {
         //        TODO: cache  the following and update each commit
         trace(&format!("getting blob ({:?})...", path));
-        let commit = self
-            .find_last_commit()?
-            .ok_or_else(|| (repo_error!("no commit")))?;
-        let tree = commit.tree()?;
+        let commit =
+            dump_error!(self.find_last_commit()).ok_or_else(|| (repo_error!("no commit")))?;
+        let tree = dump_error!(commit.tree());
         //   trace(&format!("commit tree has {} entries", tree.len()));
         Self::describe_tree(&tree, "commit_merge:commit");
-        let subtree = self.try_get_subtree(tree)?.unwrap();
+        let subtree = self
+            .try_get_subtree(tree)?
+            .ok_or_else(|| repo_error!("no subtree"))?;
         Self::describe_tree(&subtree, "commit_merge:entries in subtree");
         let entry = dump_error!(subtree.get_path(&Path::new(path)));
         let id = dump_error!(self.repo.find_blob(entry.id()));
@@ -833,51 +884,41 @@ impl FanlingRepository {
         Ok(blob)
     }
     /** do the changes */
-    fn actually_do_changes(&mut self, changes: &ChangeList) -> NullResult {
+    fn actually_do_changes(&mut self, changes: &ChangeWithOidList) -> NullResult {
         repo_trace!("actually doing changes");
-        let parent_commit = self
-            .find_last_commit()?
-            .ok_or_else(|| (repo_error!("no commit")))?;
         let old_parent_tree = self.get_latest_tree()?.clone();
         Self::describe_tree(&old_parent_tree, "actually_do_changes:old_parent_tree");
         trace("actually_do_changes: getting old subtree...");
         let old_subtree = self
             .try_get_subtree(old_parent_tree.clone())?
             .ok_or_else(|| repo_error!("no items dir"))?;
-        //   trace(&format!("old subtree has {} entries", old_subtree.len()));
         Self::describe_tree(&old_subtree, "actually_do_changes:old subtree");
         trace("actually_do_changes: building new subtree...");
         let mut new_subtree_builder = dump_error!(self.repo.treebuilder(Some(&old_subtree)));
-        let messages = Self::apply_changes_to_item_treebuilder(&mut new_subtree_builder, changes)?;
+        let messages = dump_error!(Self::apply_changes_to_item_treebuilder(
+            &mut new_subtree_builder,
+            changes
+        ));
         let new_subtree_oid = new_subtree_builder.write()?;
         trace(&format!(
             "actually_do_changes: new subtree {}",
             new_subtree_oid
         ));
         let new_subtree = dump_error!(self.repo.find_tree(new_subtree_oid));
-        // trace(&format!(
-        //     "old parent tree has {} entries",
-        //     old_parent_tree.len()
-        // ));
         Self::describe_tree(&new_subtree, "actually_do_changes:new_subtree");
-        //     Self::describe_tree(&new_subtree, "new subtree including changes");
         let mut new_parent_treebuilder = dump_error!(self.repo.treebuilder(Some(&old_parent_tree)));
-        //  self.set_item_entry(&mut new_parent_treebuilder, new_subtree_oid)?;
-        //  self.insert_blob(new_parent_treebuilder, new_subtree_oid);
         Self::insert_directory(&mut new_parent_treebuilder, &self.item_dir, new_subtree_oid)?;
         let new_parent_tree_oid = dump_error!(new_parent_treebuilder.write());
         let new_parent_tree = dump_error!(self.repo.find_tree(new_parent_tree_oid));
-        //   Self::describe_tree(&new_parent_tree, "parent tree after change");
-        // trace(&format!(
-        //     "new parent tree has {} entries",
-        //     new_parent_tree.len()
-        // ));
         Self::describe_tree(&new_parent_tree, "actually_do_changes:new parent");
         trace(&format!(
             "actually_do_changes: new parent tree {}",
             new_parent_tree_oid
         ));
         trace("all changes applied, writing commit");
+        let parent_commit = self
+            .find_last_commit()?
+            .ok_or_else(|| (repo_error!("no commit")))?;
         self.write_commit(new_parent_tree, &messages.join(" "), &[&parent_commit])?;
         trace("actually done changes.");
         Ok(())
@@ -885,19 +926,24 @@ impl FanlingRepository {
     /** apply the changes to a tree builder for items */
     fn apply_changes_to_item_treebuilder(
         tree_builder: &mut TreeBuilder,
-        changes: &ChangeList,
+        changes_with_oids: &ChangeWithOidList,
     ) -> Result<Vec<String>, RepoError> {
         repo_trace!("applying changes to tree builder");
-        let messages: Vec<String> = changes.iter().map(|c: &Change| c.descr.clone()).collect();
+        let messages: Vec<String> = changes_with_oids
+            .iter()
+            .map(|c: &ChangeWithOid| c.change.descr.clone())
+            .collect();
         trace("applying changes...");
-        for c in changes.iter() {
-            trace(&format!("applying change {:?} to tree...", &c));
-            let path = Path::new(&c.path);
-            match &c.op {
-                ObjectOperation::Add(repoid)
-                | ObjectOperation::Modify(repoid)
-                | ObjectOperation::Fix(repoid) => {
-                    let oid = repoid.to_oid()?;
+        for c in changes_with_oids.iter() {
+            trace(&format!("applying change {:?} to tree...", &c.change));
+            let path = Path::new(&c.change.path);
+            match &c.change.op {
+                ObjectOperation::Add(_data)
+                | ObjectOperation::Modify(_data)
+                | ObjectOperation::Fix(_data) => {
+                    // let repoid = self.notify_blob(data.as_bytes())?;
+
+                    let oid = c.oid.to_oid()?;
                     //   trace("actually_do_changes: j");
                     let entry = tree_builder.insert(path, oid, 0o100644 /* regular */);
                     match entry {
@@ -912,21 +958,33 @@ impl FanlingRepository {
                 _ => {
                     return Err(repo_error!(&format!(
                         "change type {:?} not implemented",
-                        c.op
+                        c.change.op
                     )))
                 }
             };
         }
         Ok(messages)
     }
+    /** */
+    pub fn add_oids_to_changelist(&mut self, changelist: ChangeList) -> ChangeWithOidList {
+        changelist
+            .iter()
+            .map(|change| {
+                let oid = match &change.op {
+                    ObjectOperation::Add(data)
+                    | ObjectOperation::Modify(data)
+                    | ObjectOperation::Fix(data) => self
+                        .notify_blob(data.as_bytes())
+                        .expect("could not convert"),
+                    _ => RepoOid::new(),
+                };
+                change.clone().with_oid(oid)
+            })
+            .collect()
+    }
     /** find all the items in the repository */
     pub fn list_all(&self) -> Result<Vec<EntryDescr>, RepoError> {
         repo_trace!("listing all");
-        // let tree = self
-        //     .find_last_commit()?
-        //     .ok_or_else(|| (repo_error!("no commit")))?
-        //     .tree()?;
-        // let subtree = self.try_get_subtree(tree)?.unwrap();
         let tree = self.get_latest_tree()?;
         trace(&format!("latest tree has {} entries", tree.len()));
         let subtree = self
@@ -944,12 +1002,12 @@ impl FanlingRepository {
                     kind: format!("{:?}", te.kind()),
                     blob: str::from_utf8(
                         te.to_object(&self.repo)
-                            .unwrap()
+                            .expect("could not convert to object")
                             .peel_to_blob()
-                            .unwrap()
+                            .expect("could not peel to blob")
                             .content(),
                     )
-                    .unwrap()
+                    .expect("bad entry descr")
                     .to_owned(),
                 }
             })
@@ -1009,8 +1067,10 @@ impl FanlingRepository {
     /** the conflicts, if any, resulting from the merge */
     pub fn conflicts(&self, mo: &MergeOutcome) -> RepoResult<ConflictList> {
         match mo {
-            MergeOutcome::AlreadyUpToDate | MergeOutcome::Merged => Ok(vec![]),
+            MergeOutcome::AlreadyUpToDate => Ok(vec![]),
+            MergeOutcome::Merged(_i) => Ok(vec![]),
             MergeOutcome::Conflict(i) => {
+                trace("finding conflicts");
                 let mut cl: ConflictList = vec![];
                 for conflict in i.conflicts()? {
                     let c = self.conflict_from_index_conflict(&conflict?)?;
@@ -1020,26 +1080,78 @@ impl FanlingRepository {
             }
         }
     }
+    /** a description identifying the repo for use in diagnostic
+    traces */
+    pub fn trace_descr(&self) -> String {
+        format!(
+            "repo with path: {:?}, url: {}",
+            self.path,
+            match &self.url {
+                None => "(none)",
+                Some(u) => &u,
+            }
+        )
+    }
 }
 impl Drop for FanlingRepository {
     fn drop(&mut self) {
         trace("dropping repo");
-        assert!(!self.needs_push, "repo needs push but dropping");
+        if thread::panicking() {
+            trace("already panicking, so no more checks")
+        } else {
+            //TODO:replace    assert!(!self.needs_push, "repo needs push but dropping");
+        }
+    }
+}
+/** descibe a git2 Object without crashing */
+fn describe_git_object(obj: &git2::Object) -> String {
+    match obj.kind() {
+        None => "(nothing)".to_owned(),
+        Some(git2::ObjectType::Commit) => "commit".to_owned(),
+        Some(k) => format!("other {:?}", k),
     }
 }
 /** a version of an [Item], for merging */
-#[derive(Debug)]
+//#[derive(Debug)]
 pub struct ItemEntry {
     pub path: String,
     pub data: Vec<u8>,
 }
+impl fmt::Debug for ItemEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:?} ({})",
+            self.path,
+            str::from_utf8(&self.data).unwrap_or("(bad string)")
+        )
+    }
+}
 
 /**    a conflict that needs to be resolved (from a merge)*/
-#[derive(Debug)]
+//#[derive(Debug)]
 pub struct Conflict {
     pub ancestor: Option<ItemEntry>,
     pub our: Option<ItemEntry>,
     pub their: Option<ItemEntry>,
+}
+impl fmt::Debug for Conflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Conflict [")?;
+        match &self.ancestor {
+            Some(ie) => write!(f, "ancestor: {:?} ", ie)?,
+            _ => (),
+        }
+        match &self.our {
+            Some(ie) => write!(f, "our: {:?} ", ie)?,
+            _ => (),
+        }
+        match &self.their {
+            Some(ie) => write!(f, "their: {:?} ", ie)?,
+            _ => (),
+        }
+        write!(f, "]")
+    }
 }
 /** a list of conflicts*/
 pub type ConflictList = Vec<Conflict>;
@@ -1047,14 +1159,14 @@ pub type ConflictList = Vec<Conflict>;
 /** possible outcomes of doing a fetch*/
 pub enum MergeOutcome {
     AlreadyUpToDate,
-    Merged,
+    Merged(Index),
     Conflict(Index),
 }
 impl fmt::Debug for MergeOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AlreadyUpToDate => write!(f, "AlreadyUpToDate"),
-            Self::Merged => write!(f, "Merged"),
+            Self::Merged(_) => write!(f, "Merged"),
             Self::Conflict(_) => write!(f, "Conflict"),
         }
     }
@@ -1070,8 +1182,8 @@ impl MergeOutcome {
     }
     pub fn index(&self) -> Option<&Index> {
         match self {
-            Self::AlreadyUpToDate | Self::Merged => None,
-            Self::Conflict(ix) => Some(ix),
+            Self::AlreadyUpToDate => None,
+            Self::Merged(ix) | Self::Conflict(ix) => Some(ix),
         }
     }
 }

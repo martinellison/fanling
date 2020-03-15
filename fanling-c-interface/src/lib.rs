@@ -2,7 +2,7 @@
 License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/*! 
+/*!
 
 `fanling-c-interface` provides a C-friendly interface for the Fanling
 functionality exposed by the [`fanling_interface`] crate.
@@ -34,7 +34,7 @@ use std::os::raw::c_char;
 use std::path::PathBuf;
 //use taipo_git_control::RepoOptions;
 
-use fanling_engine::{EngineOptions, FanlingEngine, InterfaceType, taipo_git_control};
+use fanling_engine::{taipo_git_control, EngineOptions, FanlingEngine, InterfaceType};
 use fanling_interface::{CycleEvent, Engine};
 #[macro_use]
 extern crate log;
@@ -43,8 +43,8 @@ extern crate android_log;
 use libc::c_int;
 use serde::Deserialize;
 
-#[no_mangle]/** the main data, including the [`FanlingEngine`] data
- * for the engine */
+#[no_mangle]
+/// the main data, including the [`FanlingEngine`] data for the engine
 
 pub struct LowuData {
     engine: Option<FanlingEngine>,
@@ -55,7 +55,8 @@ pub struct LowuData {
 }
 
 #[no_mangle]
-#[repr(u8)]/** application cycle events to be sent to the engine */
+#[repr(u8)]
+/// application cycle events to be sent to the engine
 pub enum CCycleEvent {
     /// open the application
     Start,
@@ -67,6 +68,8 @@ pub enum CCycleEvent {
     Stop,
     /// stop for PC interface (probably not used)
     StopPC,
+    /// destroy the application
+    Destroy,
 }
 impl CCycleEvent {
     pub fn for_c(event: CycleEvent) -> CCycleEvent {
@@ -75,6 +78,7 @@ impl CCycleEvent {
             CycleEvent::Pause => CCycleEvent::Pause,
             CycleEvent::Resume => CCycleEvent::Resume,
             CycleEvent::Stop | CycleEvent::StopPC => CCycleEvent::Stop,
+            CycleEvent::Destroy => CCycleEvent::Destroy,
         }
     }
     pub fn from_c(event: CCycleEvent) -> CycleEvent {
@@ -83,6 +87,7 @@ impl CCycleEvent {
             CCycleEvent::Pause => CycleEvent::Pause,
             CCycleEvent::Resume => CycleEvent::Resume,
             CCycleEvent::Stop | CCycleEvent::StopPC => CycleEvent::Stop,
+            CCycleEvent::Destroy => CycleEvent::Destroy,
         }
     }
 }
@@ -99,10 +104,15 @@ struct FanlingOptions {
     pub ssh_path: String,
     pub slurp_ssh: bool,
 }
-#[no_mangle]/** creates the main data structure. If you call this, you should call `delete_data` at the end of the program. */
+#[no_mangle]
+/// creates the main data structure. If you call this, you should call `delete_data` at the end of the program. Note that we initialise the android log; we can only do this once but this code is called more than once, and we have no easy way to check whether it has been called already, so we just ignore any error.
 pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mut LowuData {
-#[cfg(target_os = "android")]
-    android_log::init("taipo").expect("could not init android rust log");
+    //  println!("making data...");
+    #[cfg(target_os = "android")]
+    match android_log::init("taipo") {
+        Err(e) => debug!("on initialising android logger, got error: {:?}", e),
+        _ => {}
+    }
     debug!("making engine options in rust...");
     let fanling_options_json = string_from_c(fanling_options_json_c);
     debug!("...deserialising from json: '{}'", fanling_options_json);
@@ -114,7 +124,7 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
         .expect("bad deserialise");
     debug!("...creating engine options...");
     let engine_options = EngineOptions {
-        repo_options:taipo_git_control::RepoOptions {
+        repo_options: taipo_git_control::RepoOptions {
             path: PathBuf::from(fanling_options.git_path).into_boxed_path(),
             name: fanling_options.name,
             email: fanling_options.email,
@@ -147,7 +157,7 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
         }
         Ok(e) => Some(e),
     };
-    debug!("got engine");
+    debug!("got engine, making top level rust data...");
     let data = Box::into_raw(Box::new(LowuData {
         engine,
         last_string: string_to_cstring(msg),
@@ -159,15 +169,18 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
     data
 }
 
-#[no_mangle]/** deletes the main data structure */
+#[no_mangle]
+/// deletes the main data structure
 pub unsafe extern "C" fn delete_data(data: *mut LowuData) {
+    debug!("deleting rust data...");
     let _b = Box::from_raw(data);
 }
 fn string_from_c(s: *const c_char) -> String {
     unsafe { CStr::from_ptr(s).to_string_lossy().into_owned() }
 }
 
-#[no_mangle]/** execute an action (just wraps the engine call) */
+#[no_mangle]
+/// execute an action (just wraps the engine call)
 pub extern "C" fn execute(data: *mut LowuData, body: *const c_char) {
     // let bs = CStr::from_ptr(body).to_string_lossy().into_owned();
     let bs = string_from_c(body);
@@ -191,7 +204,8 @@ pub extern "C" fn execute(data: *mut LowuData, body: *const c_char) {
 //     d.last_response = fanling_interface::default_response_result();
 // }
 
-#[no_mangle]/** handles a life cycle event (just wraps the engine call) */
+#[no_mangle]
+/// handles a life cycle event (just wraps the engine call)
 pub extern "C" fn handle_event(data: *mut LowuData, event: CCycleEvent) {
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
     debug!("handling event");
@@ -203,7 +217,8 @@ pub extern "C" fn handle_event(data: *mut LowuData, event: CCycleEvent) {
     }
 }
 
-#[no_mangle]/** creates the initial HTML  (just wraps the engine call) */
+#[no_mangle]
+/// creates the initial HTML  (just wraps the engine call)
 pub extern "C" fn initial_html(data: *mut LowuData) -> *const c_char {
     debug!("getting inital html...");
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
@@ -238,12 +253,14 @@ pub extern "C" fn initial_html(data: *mut LowuData) -> *const c_char {
 fn string_to_cstring(s: String) -> CString {
     CString::new(s).expect("string_to_cstring error")
 }
-#[no_mangle]/** checks if the response is OK */
+#[no_mangle]
+/// checks if the response is OK
 pub extern "C" fn response_ok(data: *mut LowuData) -> bool {
     let d = unsafe { data.as_ref().expect("bad pointer") };
     d.last_response.is_ok()
 }
-#[no_mangle]/** the number of items in the response */
+#[no_mangle]
+/// the number of items in the response
 pub extern "C" fn response_num_items(data: *mut LowuData) -> c_int {
     let d = unsafe { data.as_ref().expect("bad pointer") };
     match &d.last_response {
@@ -251,11 +268,12 @@ pub extern "C" fn response_num_items(data: *mut LowuData) -> c_int {
         Err(_) => 0,
     }
 }
-#[no_mangle]/** a response item, selected by index */
+#[no_mangle]
+/// a response item, selected by index
 pub extern "C" fn response_item(data: *mut LowuData, n: c_int) -> CResponseItem {
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
     let ss = match &d.last_response {
-        Ok(r) => r.get_tag(n as usize).clone(),
+        Ok(r) => r.get_tag(n as usize),
         Err(_e) => ("".to_string(), "".to_string()),
     };
     d.last_key = string_to_cstring(ss.0.to_string());
@@ -265,7 +283,8 @@ pub extern "C" fn response_item(data: *mut LowuData, n: c_int) -> CResponseItem 
         value: d.last_string.as_ptr(),
     }
 }
-#[no_mangle]/** the error message, if the response is an error */
+#[no_mangle]
+/// the error message, if the response is an error
 pub extern "C" fn response_error(data: *mut LowuData) -> *const c_char {
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
     d.last_string = string_to_cstring(match &d.last_response {
@@ -274,7 +293,8 @@ pub extern "C" fn response_error(data: *mut LowuData) -> *const c_char {
     });
     d.last_string.as_ptr()
 }
-#[no_mangle]/** whether the response requires the application to be shut down */
+#[no_mangle]
+/// whether the response requires the application to be shut down
 pub extern "C" fn is_shutdown_required(data: *mut LowuData) -> bool {
     let d = unsafe { data.as_ref().expect("bad pointer") };
     match &d.last_response {
@@ -284,7 +304,8 @@ pub extern "C" fn is_shutdown_required(data: *mut LowuData) -> bool {
 }
 #[no_mangle]
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]/** an item of a response */
+#[derive(Debug, Copy, Clone)]
+/// an item of a response
 pub struct CResponseItem {
     pub key: *const c_char,
     pub value: *const c_char,
