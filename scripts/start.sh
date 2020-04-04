@@ -37,18 +37,22 @@ else
      #   cargo upgrade --aggressive
     fi
     echo "restoring old cargo"
-    git checkout $BASE/fanling-engine/Cargo.toml $BASE/taipo-git-control/Cargo.toml
+    git checkout $BASE/fanling-engine/Cargo.toml 
     export PATH=$PATH:$BASE/scripts:$BASE/target/debug
-    $BASE/scripts/show-doco.sh &
+    diesel database reset
+    $BASE/scripts/db-rebuild.sh 
     
     if [[ "$NETSPEED" != "fast" && $START_TYPE != "all" ]] ; then
         echo "pulling new cargo files..."
         cargo fetch
     fi
-    $BASE/scripts/db-rebuild.sh 
+    # $BASE/scripts/db-rebuild.sh 
 
     qgit&
-    scripts/edit.sh
     scripts/copy-ssh.sh&
+    cargo fix --allow-dirty
     cargo fmt
+    cargo +nightly fix -Z unstable-options --clippy --allow-dirty
+    scripts/edit.sh
+    $BASE/scripts/show-doco.sh &
 fi

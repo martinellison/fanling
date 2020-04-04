@@ -123,7 +123,7 @@ impl FanlingRepository {
             .clone()
             .ok_or_else(|| repo_error!("URL must be specified for clone"))?;
         trace(&format!(
-            "actually cloning ({:?}) to {:?}...",
+            "actually cloning (url {:?}) to {:?}...",
             url, &opts.path
         ));
         let r = dump_error!(builder.clone(&url, &opts.path.clone()));
@@ -556,7 +556,7 @@ impl FanlingRepository {
             trace("commits are the same, not merging");
             return Ok(MergeOutcome::AlreadyUpToDate);
         }
-        // TODO: maybe use merge analysis
+        // FUTURE: maybe use merge analysis
         trace("commits different, so merging and finding conflicts...");
         let index = dump_error!(self.repo.merge_commits(
             &our_commit,
@@ -627,7 +627,7 @@ impl FanlingRepository {
                 "merge outcome had conflict, applying {} changes to index",
                 changes.len()
             ));
-            self.repo.set_index(index);
+            self.repo.set_index(index)?;
             self.apply_changelist_to_index(changes, index)
         } else {
             Err(repo_error!("should not come here: should be conflict"))
@@ -863,8 +863,8 @@ impl FanlingRepository {
     }
     /** Give a path, retrieve the blob at that location. */
     pub fn blob_from_path(&self, path: &str) -> Result<Vec<u8>, RepoError> {
-        //        TODO: cache  the following and update each commit
-        trace(&format!("getting blob ({:?})...", path));
+        //        FUTURE: cache  the following and update each commit
+        repo_trace!(&format!("getting blob (path {:?})...", path));
         let commit =
             dump_error!(self.find_last_commit()).ok_or_else(|| (repo_error!("no commit")))?;
         let tree = dump_error!(commit.tree());
@@ -874,13 +874,15 @@ impl FanlingRepository {
             .try_get_subtree(tree)?
             .ok_or_else(|| repo_error!("no subtree"))?;
         Self::describe_tree(&subtree, "commit_merge:entries in subtree");
+        trace("getting entry from repo...");
         let entry = dump_error!(subtree.get_path(&Path::new(path)));
         let id = dump_error!(self.repo.find_blob(entry.id()));
         let content = id.content();
+        let content_length = content.len();
         let mut blob: Vec<u8> = vec![];
-        blob.resize(content.len(), 0);
+        blob.resize(content_length, 0);
         blob.clone_from_slice(content);
-        trace("got blob.");
+        trace(&format!("got blob, length {}.", content_length));
         Ok(blob)
     }
     /** do the changes */
@@ -1099,7 +1101,9 @@ impl Drop for FanlingRepository {
         if thread::panicking() {
             trace("already panicking, so no more checks")
         } else {
-            //TODO:replace    assert!(!self.needs_push, "repo needs push but dropping");
+            if self.needs_push {
+                trace("repo needs push but dropping|");
+            }
         }
     }
 }

@@ -21,7 +21,7 @@ public class PreferencesActivity extends PreferenceActivity {
     private static final String[] keys = {
             "git_path",
             "git_branch", "git_has_url", "git_url", "git_name", "git_email", "database_path",
-            "unique_prefix", "ssh_path", "slurp_ssh"
+            "unique_prefix", "ssh_path", "slurp_ssh", "auto_link"
     };
     public final static int NOT_CHANGED_RESULT = RESULT_FIRST_USER;
     public final static int CHANGED_RESULT = RESULT_FIRST_USER + 1;

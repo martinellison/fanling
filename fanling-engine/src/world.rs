@@ -13,6 +13,7 @@ use crate::search::Search;
 use crate::shared::{FLResult, FanlingError, NullResult, Tracer};
 use crate::store::Store;
 use askama::Template;
+use fanling_interface::error_response_result;
 use log::trace;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -84,7 +85,7 @@ impl<'a> World {
                 for entry in self.store.list_all_items()? {
                     // trace(&format!("should load {:?}", entry));
                     let (base, values) = split_data_parts(entry.blob.as_bytes())?;
-                    let ident = self.make_known(values, base)?;
+                    let ident = self.make_known(&values, base)?;
                     let path_from_ident = self.store.path_from_ident(&ident);
                     if path_from_ident != entry.path {
                         return Err(fanling_error!(&format!(
@@ -231,21 +232,30 @@ impl<'a> World {
         // let mut vals = HashMap::new();
         // vals.insert("name".to_owned(), "Default context".to_owned());
         // self.default_context = Some(self.make_item(&type_name, &base, &vals)?);
-        self.default_context = Some(self.ensure_item("default_context".to_owned())?);
+        self.default_context =
+            Some(self.ensure_item("default_context".to_owned(), "Simple".to_string())?);
         trace("created context.");
         Ok(())
     }
-    /** create an item (simple only) */
-    fn ensure_item(&mut self, ident: Ident) -> FLResult<ItemRef> {
-        let type_name = "Simple".to_owned();
+    /** create an item */
+    fn ensure_item(&mut self, ident: Ident, type_name: Ident) -> FLResult<ItemRef> {
+        //  let type_name = "Simple".to_owned();
         let base = ItemBaseForSerde {
             ident: ident.to_owned(),
             type_name: type_name.clone(),
-            can_be_context: true,
+            can_be_context: type_name == "Simple",
+            can_be_parent: true,
             ..ItemBaseForSerde::default()
         };
         let mut vals = HashMap::new();
         vals.insert("name".to_owned(), ident);
+        match type_name.as_str() {
+            "Simple" => {}
+            "Task" => {
+                vals.insert("context".to_string(), "default_context".to_string());
+            }
+            _ => return Err(fanling_error!(&format!("invalid type '{}'", &type_name))),
+        }
         let res = self.make_item(&type_name, &base, &vals)?;
         Ok(res)
     }
@@ -285,7 +295,7 @@ impl<'a> World {
         let mut item = item_type.make_raw();
         //  let mut item: Item = ItemType::from(*item_type_rcrc.borrow()).make_raw();
         item.set_data(vals, self)?;
-        let descr = item.description();
+        let descr = item.descr_for_ident();
         if descr.is_empty() {
             return Err(fanling_error!("description must not be blank"));
         }
@@ -298,7 +308,6 @@ impl<'a> World {
 
         trace(&format!("item as created {:#?}", item));
         let item_rcrc = Rc::new(RefCell::new(item));
-        // TODO set values (which values?)
         self.store.add_item(&item_rcrc)?;
         self.search.add_item(&item_rcrc)?;
         trace("made item.");
@@ -338,7 +347,7 @@ impl<'a> World {
         _json_value: serde_json::value::Value,
     ) -> fanling_interface::ResponseResult {
         let mut res = match basic_request.action.kind() {
-            crate::ActionKind::Engine => panic!("should not come here"),
+            crate::ActionKind::Engine => error_response_result("should not come here"),
             crate::ActionKind::World => self.do_world_action(basic_request),
             crate::ActionKind::Item => {
                 let ident: Ident = basic_request
@@ -346,26 +355,34 @@ impl<'a> World {
                     .as_ref()
                     .ok_or_else(|| fanling_error!("need ident here"))?
                     .to_string();
-                let item_rf = self.get_item(ident)?;
+                let item_rf = self.get_item(ident, "Simple".to_owned())?;
                 let item: &mut Item = &mut item_rf.deref().borrow_mut();
                 let res = item.do_action(basic_request.action.clone(), self)?;
+                trace("item action done");
                 Ok(res)
             }
         }?;
         self.add_always(&mut res)?;
+        trace("action done");
         Ok(res)
     }
     /** get an [`Item`] by [`Ident`] */
-    pub fn get_item(&mut self, ident: Ident) -> FLResult<ItemRef> {
+    pub fn get_item(&mut self, ident: Ident, type_name: Ident) -> FLResult<ItemRef> {
         trace(&format!("getting item '{}'", ident));
         match self.store.get_item_if_known(&ident) {
             Some(i) => Ok(i.clone()),
             None => {
-                if self.auto_link && !(self.store.has_file(&ident).expect("bad???")) {
-                    self.ensure_item(ident.clone())?;
+                //  if let Some(type_name) = type_option {
+                if self.auto_link
+                    && !(self
+                        .store
+                        .has_file(&ident)
+                        .expect("error when checking if page in store"))
+                {
+                    self.ensure_item(ident.clone(), type_name)?;
                 }
                 let (base, serde_value) = self.store.get_item_parts(&ident)?;
-                let item_ref = self.get_and_make_known(serde_value, &base)?;
+                let item_ref = self.get_and_make_known(&serde_value, &base)?;
                 Ok(item_ref)
             }
         }
@@ -373,7 +390,7 @@ impl<'a> World {
     /** take the raw data for an item and ensure that the item is ready to use */
     fn get_and_make_known(
         &mut self,
-        serde_value: serde_yaml::Value,
+        serde_value: &serde_yaml::Value,
         base: &ItemBaseForSerde,
     ) -> FLResult<ItemRef> {
         fanling_trace!("getting and making known");
@@ -390,7 +407,7 @@ impl<'a> World {
         &mut self,
         item_type: &ItemType,
         base: &ItemBaseForSerde,
-        serde_value: serde_yaml::Value,
+        serde_value: &serde_yaml::Value,
     ) -> FLResult<ItemRef> {
         fanling_trace!(&format!("making and populating item {}", &base.ident));
         let mut item = item_type.make_raw();
@@ -406,6 +423,7 @@ impl<'a> World {
         );
         trace(&format!("setting ident ({})...", base.ident));
         item.set_ident(base.ident.clone());
+        item.fix_data(serde_value, self)?;
         trace("item made and populated");
         Ok(Rc::new(RefCell::new(item)))
     }
@@ -429,7 +447,11 @@ impl<'a> World {
         //    _json_value: serde_json::value::Value,
     ) -> fanling_interface::ResponseResult {
         match &basic_request.action {
-            crate::Action::Start => Ok(fanling_interface::Response::new()),
+            crate::Action::Start | crate::Action::ListReady => {
+                let mut open = self.search.search_open_hier()?;
+                let mut ready = open.filter_on_item(|i, world| i.is_ready(world), self)?;
+                Self::show_list(&mut ready, "ready")
+            }
             crate::Action::Create(base, vals) => {
                 let type_name = basic_request.ensure_type_name()?;
                 let item_type_rf = self.get_item_type(type_name.clone())?;
@@ -443,28 +465,29 @@ impl<'a> World {
                 }
                 let item_ref = self.make_item(&type_name, &base, &vals)?;
                 let res = item_ref.deref().borrow_mut().for_edit(true, self);
+                fanling_trace!("action done");
                 res
             }
             crate::Action::Update(base, vals) => {
                 let res = self.update_item_action(basic_request, &base, vals)?;
+                fanling_trace!("action done");
                 Ok(res)
             }
             crate::Action::Delete => self.delete_item_action(basic_request),
             crate::Action::GetAll => self.get_all(),
             crate::Action::CheckData => self.check_data(),
-            crate::Action::ListReady => {
-                let mut ready = self.search.search_ready_hier()?;
-                ready.set_level_changes();
-                trace(&format!("ready {:?}", &ready));
-                let lt = ListTemplate { items: ready };
-                let mut resp = fanling_interface::Response::new();
-                resp.add_tag("content", &(lt.render()?));
-                //   trace(&format!("ready list {:?}", &resp));
-                Ok(resp)
+            crate::Action::ListOpen => {
+                let mut open = self.search.search_open_hier()?;
+                Self::show_list(&mut open, "open")
+            }
+            crate::Action::ListAll => {
+                let mut all = self.search.search_all_hier()?;
+                Self::show_list(&mut all, "all")
             }
             crate::Action::Pull => {
                 trace("doing pull action");
                 self.pull()?;
+                fanling_trace!("action done");
                 Ok(fanling_interface::Response::new())
             }
             crate::Action::Push { force } => {
@@ -474,6 +497,7 @@ impl<'a> World {
                     "after push, needs push: {:?}",
                     self.store.get_needs_push()
                 ));
+                fanling_trace!("action done");
                 Ok(fanling_interface::Response::new())
             }
             crate::Action::New => {
@@ -481,6 +505,7 @@ impl<'a> World {
                 trace(&format!("new for item type {}", item_type_name));
                 let item_type = self.get_item_type(item_type_name)?;
                 let mut item = item_type.deref().borrow().make_raw();
+                fanling_trace!("action done");
                 item.for_edit(false, self)
             }
             crate::Action::NewChild(parent_ident) => {
@@ -493,14 +518,38 @@ impl<'a> World {
                 };
                 // self.set_parent_from_ident(&mut item, &base)?;
                 item.set_from_serde(&base)?;
+                fanling_trace!("action done");
                 item.for_edit(false, self)
             }
             crate::Action::Clone => {
                 let res = self.clone_item(basic_request);
+                fanling_trace!("action done");
                 res
             }
-            _ => panic!("invalid action {:?}", basic_request.action),
+            _ => error_response_result(&format!("invalid action {:?}", basic_request.action)),
         }
+    }
+    /** show a list of items */
+    fn show_list(list: &mut ItemListEntryList, narr: &str) -> fanling_interface::ResponseResult {
+        list.set_level_changes();
+        trace(&format!(
+            "{}: {} entries {:?}",
+            narr,
+            list.entries.len(),
+            &list
+        ));
+        #[cfg(test)]
+        let entries_count = list.num_entries();
+        let lt = ListTemplate {
+            items: list.clone(),
+        };
+        let mut resp = fanling_interface::Response::new();
+        resp.add_tag("content", &(lt.render()?));
+        #[cfg(test)]
+        resp.set_test_data("count", &format!("{}", entries_count));
+        //   trace(&format!("list list {:?}", &resp));
+        fanling_trace!("showing list");
+        Ok(resp)
     }
     /** update an item */
     fn update_item_action(
@@ -515,7 +564,7 @@ impl<'a> World {
         let action_result = self.check_item_valid(item_type_rf, base, vals)?;
         trace(&format!("action result is {:#?}", action_result));
         if action_result.ok() {
-            let item_rf = self.get_item(ident)?;
+            let item_rf = self.get_item(ident, "Simple".to_owned())?;
             let mut item = item_rf.deref().borrow_mut();
             trace(&format!("values for base update: {:#?}", base));
             item.set_from_serde(base)?;
@@ -534,7 +583,7 @@ impl<'a> World {
         basic_request: &crate::BasicRequest,
     ) -> fanling_interface::ResponseResult {
         let existing_ident: Ident = basic_request.ensure_ident()?;
-        let existing_item_rf = self.get_item(existing_ident)?;
+        let existing_item_rf = self.get_item(existing_ident, "Simple".to_owned())?;
         let existing_item = existing_item_rf.deref().borrow_mut();
         let item_type_rf = existing_item.item_type();
         let item_type = item_type_rf.deref().borrow();
@@ -542,7 +591,7 @@ impl<'a> World {
         item.clone_from(&existing_item)?;
         item.set_ident(
             self.store
-                .make_identifier(&self.uniq_pfx, &item.description()), //??
+                .make_identifier(&self.uniq_pfx, &item.descr_for_ident()),
         );
         assert!(item.ident() != "", "ident is null");
         self.search
@@ -569,7 +618,7 @@ impl<'a> World {
         let type_name = basic_request.ensure_type_name()?;
         let _item_type_rf = self.get_item_type(type_name)?;
         // TODO check whether item can be deleted
-        let item_rf = self.get_item(ident)?;
+        let item_rf = self.get_item(ident, "Simple".to_owned())?;
         self.search.delete_item(item_rf.clone())?;
         self.store.mark_item_deleted(item_rf)?;
         Ok(fanling_interface::Response::new())
@@ -616,7 +665,7 @@ impl<'a> World {
                             // let item_ref = self.get_and_make_known(serde_value, &base)?;
                             // self.search.add_item(&item_ref)?;
                             // assert_eq!(ident_from_path, item_ref.deref().borrow().ident());
-                            let ident = self.make_known(serde_value, base)?;
+                            let ident = self.make_known(&serde_value, base)?;
                             assert_eq!(ident_from_path, ident);
                         }
                     }
@@ -629,7 +678,7 @@ impl<'a> World {
     /** add the item to the search engine */
     fn make_known(
         &mut self,
-        serde_value: serde_yaml::Value,
+        serde_value: &serde_yaml::Value,
         base: ItemBaseForSerde,
     ) -> FLResult<Ident> {
         let item_ref = self.get_and_make_known(serde_value, &base)?;
@@ -649,9 +698,9 @@ impl<'a> World {
     pub fn search_contexts(&self) -> FLResult<ItemListEntryList> {
         Ok(self.search.search_special(SpecialKind::Context)?)
     }
-    /** search everything for ready with hierarchy */
-    pub fn search_ready_hier(&self) -> FLResult<ItemListEntryList> {
-        self.search.search_ready_hier()
+    /** search everything for open with hierarchy */
+    pub fn search_open_hier(&self) -> FLResult<ItemListEntryList> {
+        self.search.search_open_hier()
     }
     /** cross-check search and store */
     fn check_data(&self) -> fanling_interface::ResponseResult {
@@ -679,8 +728,13 @@ impl<'a> World {
                 None => trace(&format!("bad path {}", path)),
                 Some(ident) => {
                     if !searched.contains_key(&ident) {
-                        trace(&format!("{} in store repo but not search database", &ident));
+                        let msg = format!("{} in store repo but not search database", &ident);
+                        trace(&msg);
                         missing_from_search_count += 1;
+                        // #[cfg(test)]
+                        // {
+                        //     panic!(msg);
+                        // }
                     }
                     searched.insert(ident.clone(), true);
                 }
@@ -690,11 +744,13 @@ impl<'a> World {
         let mut missing_from_store_count = 0;
         for (ident, found) in searched.iter() {
             if !found {
-                trace(&format!(
-                    "{} not in store repo but in search database",
-                    &ident,
-                ));
+                let msg = format!("{} not in store repo but in search database", &ident,);
+                trace(&msg);
                 missing_from_store_count += 1;
+                // #[cfg(test)]
+                // {
+                //     panic!(msg);
+                // }
             }
         }
         trace(&format!(
@@ -719,9 +775,9 @@ impl<'a> World {
     pub fn push(&mut self, force: bool) -> NullResult {
         self.store.push(force)
     }
-    /** find all the children of this item that have ready status */
-    pub fn search_ready_children(&self, ident: &str) -> FLResult<ItemListEntryList> {
-        self.search.search_ready_children(ident)
+    /** find all the children of this item that have open status */
+    pub fn search_open_children(&self, ident: &str) -> FLResult<ItemListEntryList> {
+        self.search.search_open_children(ident)
     }
     /** get an item if it is already known. (This can be used to check whether an item is known). */
     pub fn get_item_if_known(&self, ident: &Ident) -> Option<&ItemRef> {
@@ -764,19 +820,26 @@ pub enum ActionResponse {
         specifics: Vec<(String, String)>,
     },
     Success {
+        #[cfg(test)]
         /** identifier if created by the action*/
-        ident: Option<Ident>,
+        test_data: HashMap<String, String>,
     },
 }
 impl ActionResponse {
     /** create a new `ActionResponse` */
     pub fn new() -> Self {
-        Self::Success { ident: None }
+        Self::Success {
+            #[cfg(test)]
+            test_data: HashMap::new(),
+        }
     }
     /** record that a user error has been found */
     pub fn add_error(&mut self, area: &str, m: &str) {
         match self {
-            Self::Success { ident: _ } => {
+            Self::Success {
+                #[cfg(test)]
+                    test_data: _,
+            } => {
                 let mut ss = Vec::new();
                 ss.push((area.to_owned(), m.to_owned()));
                 *self = Self::Failure {
@@ -801,12 +864,19 @@ impl ActionResponse {
     }
     /** whether there has been no errors */
     pub fn ok(&self) -> bool {
-        *self == Self::Success { ident: None }
+        *self
+            == Self::Success {
+                #[cfg(test)]
+                test_data: HashMap::new(),
+            }
     }
     /** user errors */
     pub fn errors(&self) -> Vec<(String, String)> {
         match self {
-            Self::Success { ident: _ } => vec![],
+            Self::Success {
+                #[cfg(test)]
+                    test_data: _,
+            } => vec![],
             Self::Failure {
                 messages: _,
                 specifics,
@@ -816,7 +886,10 @@ impl ActionResponse {
     /** overall user error message */
     pub fn overall_message(&self) -> String {
         match self {
-            Self::Success { ident: _ } => "".to_owned(),
+            Self::Success {
+                #[cfg(test)]
+                    test_data: _,
+            } => "".to_owned(),
             Self::Failure {
                 messages,
                 specifics: _,
@@ -829,16 +902,18 @@ impl ActionResponse {
         for (t, v) in self.errors() {
             response.add_tag(&t, &v);
         }
-        if let Some(id) = self.ident() {
-            response.set_ident(id);
-        }
+        // if let Some(td) = self. {
+        #[cfg(test)]
+        response.set_all_test_data(self.get_test_data());
+        //   }
         Ok(response)
     }
-    /** associate an [`Ident`] */
-    pub fn set_ident(&mut self, new_ident: &Ident) {
+    #[cfg(test)]
+    /** associate test data */
+    pub fn set_test_data(&mut self, test_data: HashMap<String, String>) {
         match self {
-            Self::Success { ident: id } => {
-                *id = Some(new_ident.to_owned());
+            Self::Success { test_data: td } => {
+                *td = test_data;
             }
             Self::Failure {
                 messages: _,
@@ -846,14 +921,26 @@ impl ActionResponse {
             } => {}
         }
     }
+    #[cfg(test)]
     /** retrieve the  [`Ident`] */
-    pub fn ident(&self) -> Option<Ident> {
+    pub fn ident(&self) -> Option<String> {
         match self {
-            Self::Success { ident } => ident.clone(),
+            Self::Success { test_data: td } => Some(td.get("ident").unwrap().clone()),
             Self::Failure {
                 messages: _,
                 specifics: _,
             } => None,
+        }
+    }
+    #[cfg(test)]
+    /** retrieve the test data */
+    pub fn get_test_data(&self) -> HashMap<String, String> {
+        match self {
+            Self::Success { test_data: td } => td.clone(),
+            Self::Failure {
+                messages: _,
+                specifics: _,
+            } => HashMap::new(),
         }
     }
 }

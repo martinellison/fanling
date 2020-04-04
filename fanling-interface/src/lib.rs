@@ -18,7 +18,7 @@ Currently, this interface is used by:
 * an Android implementation using the `fanling_c*interface` crate and the
 `Lowu` Android app.
 */
-
+use std::collections::HashMap;
 use std::fmt;
 
 /** trait for an interface between a main program and an engine  */
@@ -52,6 +52,11 @@ pub fn default_response_result() -> ResponseResult {
     trace("getting default response result");
     Ok(Response::default())
 }
+///
+pub fn error_response_result(msg: &str) -> ResponseResult {
+    trace("getting error response result");
+    Ok(Response::new_error_with_tags(&vec![("error", msg)]))
+}
 /** the response from the Engine to the user interface resulting from a command or event */
 #[derive(Default, Clone, Debug)]
 pub struct Response {
@@ -63,8 +68,9 @@ pub struct Response {
     shutdown_required: bool,
     /** whether the response includes an error */
     error: bool,
-    /** assocated ident if any */
-    ident: Option<String>,
+    /** assocated test data if any */
+    //   #[cfg(test)]
+    test_data: HashMap<String, String>,
 }
 impl Response {
     /**  create a response */
@@ -74,7 +80,8 @@ impl Response {
             //  to_clear: vec![],
             shutdown_required: false,
             error: false,
-            ident: None,
+            //  #[cfg(test)]
+            test_data: HashMap::new(),
         }
     }
     /** tell the user interface to clear any errors from the user's display*/
@@ -100,10 +107,17 @@ impl Response {
             self.add_tag(ss.0, ss.1)
         }
     }
-    /** create a response with  several tag/value pairs */
+    /** create a response with several tag/value pairs */
     pub fn new_with_tags(tags: &[(&str, &str)]) -> Self {
         let mut resp = Self::new();
         resp.add_tags(tags);
+        resp
+    }
+    /** create a response with several tag/value pairs and an error */
+    pub fn new_error_with_tags(tags: &[(&str, &str)]) -> Self {
+        let mut resp = Self::new();
+        resp.add_tags(tags);
+        resp.set_error();
         resp
     }
     // /** get the tags to clear from the response */
@@ -128,7 +142,7 @@ impl Response {
     }
     /** the user interface should shut down */
     pub fn set_shutdown_required(&mut self) {
-        self.shutdown_required = true
+        self.shutdown_required = true;
     }
     /**  whether the response includes an error */
     pub fn is_error(&self) -> bool {
@@ -136,15 +150,43 @@ impl Response {
     }
     /**  set that the response includes an error */
     pub fn set_error(&mut self) {
-        self.error = true
+        self.error = true;
     }
-    /**  get associated ident if any */
-    pub fn get_ident(&self) -> Option<String> {
-        self.ident.clone()
+    /**  get associated test data if any */
+    pub fn get_test_data(&self, tag: &str) -> String {
+        // #[cfg(test)]
+        // {
+        self.test_data
+            .get(tag)
+            .expect(&format!("no tag: {}", tag))
+            .to_string()
+        // }
+        // #[cfg(not(test))]
+        // {
+        //     panic!("bad test data");
+        // }
     }
-    /**  set the ident */
-    pub fn set_ident(&mut self, ident: String) {
-        self.ident = Some(ident.to_string())
+    /**  set all the test data */
+    pub fn set_test_data(&mut self, key: &str, val: &str) {
+        // #[cfg(test)]
+        // {
+        self.test_data.insert(key.to_string(), val.to_string());
+        // }
+        // #[cfg(not(test))]
+        // {
+        //     panic!("bad test data");
+        // }
+    }
+    /**  set all the test data */
+    pub fn set_all_test_data(&mut self, test_data: HashMap<String, String>) {
+        // #[cfg(test)]
+        // {
+        self.test_data = test_data;
+        // }
+        // #[cfg(not(test))]
+        // {
+        //     panic!("bad test data");
+        // }
     }
 }
 #[derive(Debug)]

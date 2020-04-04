@@ -103,6 +103,7 @@ struct FanlingOptions {
     pub unique_prefix: String,
     pub ssh_path: String,
     pub slurp_ssh: bool,
+    pub auto_link: bool,
 }
 #[no_mangle]
 /// creates the main data structure. If you call this, you should call `delete_data` at the end of the program. Note that we initialise the android log; we can only do this once but this code is called more than once, and we have no easy way to check whether it has been called already, so we just ignore any error.
@@ -143,7 +144,7 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
             database_path: fanling_options.database_path,
         },
         uniq_pfx: fanling_options.unique_prefix,
-        auto_link: false,
+        auto_link: fanling_options.auto_link,
     };
     debug!("options as read {:#?}", engine_options);
     debug!("making data in rust...");
@@ -184,13 +185,16 @@ fn string_from_c(s: *const c_char) -> String {
 pub extern "C" fn execute(data: *mut LowuData, body: *const c_char) {
     // let bs = CStr::from_ptr(body).to_string_lossy().into_owned();
     let bs = string_from_c(body);
-    debug!("executing {}", bs);
+    debug!("executing {} [from rust-c]", bs);
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
     match &mut d.engine {
         Some(e) => d.last_response = e.execute(&bs),
-        None => {}
+        None => {
+            debug!("no engine!");
+        }
     }
-    debug!("execution result {:?}", d.last_response);
+    debug!("executed [from rust-c]");
+    debug!("execution result {:?} [from rust-c]", d.last_response);
 }
 
 // #[no_mangle]

@@ -96,8 +96,8 @@ impl Item {
         self.data.is_open()
     }
     /** is the  [`Item`] ready to be used? */
-    pub fn is_ready(&self) -> bool {
-        self.data.is_ready()
+    pub fn is_ready(&mut self, world: &mut World) -> FLResult<bool> {
+        self.data.is_ready(world)
     }
     /** classify the item */
     pub fn classify(&self) -> String {
@@ -152,9 +152,11 @@ impl Item {
         self.base.item_type.clone()
     }
     /** set the Item from YAML data */
-    pub fn set_from_yaml(&mut self, yaml: serde_yaml::Value, world: &mut World) -> NullResult {
+    pub fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult {
         fanling_trace!("setting from yaml");
-        self.data.set_from_yaml(yaml, world)
+        self.data.set_from_yaml(&yaml, world)?;
+        //   self.data.fix_data(&yaml, &mut self.base, world)?;
+        Ok(())
     }
     /** display for editing */
     pub fn for_edit(
@@ -162,15 +164,23 @@ impl Item {
         is_for_update: bool,
         world: &mut World,
     ) -> fanling_interface::ResponseResult {
-        self.data.for_edit(&mut self.base, is_for_update, world)
+        let rr = self.data.for_edit(&mut self.base, is_for_update, world);
+        fanling_trace!("for edit");
+        rr
     }
     /** display for show */
     pub fn for_show(&mut self, world: &mut World) -> fanling_interface::ResponseResult {
-        self.data.for_show(&mut self.base, world)
+        let rr = self.data.for_show(&mut self.base, world);
+        fanling_trace!("for show");
+        rr
     }
     /** serialise the Item to YAML */
     pub fn to_yaml(&self) -> Result<Vec<u8>, FanlingError> {
         self.data.to_yaml(&self.base)
+    }
+    /** can be turned into an ident */
+    pub fn descr_for_ident(&self) -> String {
+        self.data.descr_for_ident()
     }
     // an English-language description
     /** a human-readable summary of the Item */
@@ -256,6 +266,25 @@ impl Item {
         changes.push(change);
         Ok(())
     }
+    /** */
+    pub fn fix_data(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult {
+        self.data.fix_data(yaml, &mut self.base, world)
+    }
+    // #[cfg(test)]
+    // /** generate some data useful in tests */
+    // pub fn make_test_data(&self) -> HashMap<String, String> {
+    //     let mut td = HashMap::new();
+    //     td.insert("ident".to_string(), self.ident());
+    //     td.insert(
+    //         "ready".to_string(),
+    //         if self.is_ready() {
+    //             "true".to_string()
+    //         } else {
+    //             "false".to_string()
+    //         },
+    //     );
+    //     td
+    // }
 }
 /** attributes of an [`Item`] that are the same for all `Item`s. */
 #[derive(Debug, Clone)]
@@ -356,13 +385,19 @@ impl ItemBase {
             self.special.add(SpecialKind::Context);
         }
         // do not copy targeted
-        // TODO: should we copy when_created and when_modified?
+        self.when_created = base.when_created;
+        let naive_date_time = Utc::now().naive_utc();
+        self.when_modified = naive_date_time;
         trace("set base from serde.");
         Ok(())
     }
     /** set parent */
     pub fn set_parent(&mut self, parent: Option<ItemLink>) {
         self.parent = parent;
+    }
+    /** has a parent item */
+    pub fn has_parent(&self) -> bool {
+        self.parent.is_some()
     }
     /** can the  [`Item`] be used as a parent? */
     pub fn get_special(&self, sk: SpecialKind) -> bool {
@@ -394,9 +429,9 @@ impl ItemBase {
     pub fn get_sort(&self) -> String {
         self.sort.clone()
     }
-    /** get all the children of this [`Item`] */
-    pub fn get_item_children(&self, world: &World) -> FLResult<ItemListEntryList> {
-        world.search_ready_children(&self.ident)
+    /** get all children with open status */
+    pub fn get_open_children(&self, world: &World) -> FLResult<ItemListEntryList> {
+        world.search_open_children(&self.ident)
     }
     /** copy from another base */
     pub fn clone_from(&mut self, other: &Self) {
@@ -583,19 +618,26 @@ pub trait ItemData: Debug {
     /** is the  [`Item`] open? */
     fn is_open(&self) -> bool;
     /**  is the  [`Item`] ready? */
-    fn is_ready(&self) -> bool;
+    fn is_ready(&mut self, world: &mut World) -> FLResult<bool>;
     /** an English-language description */
     fn description(&self) -> String;
     /** copy from another item data */
     fn fanling_clone(&self) -> FLResult<Box<dyn ItemData>>;
-    // where
-    //     Self: Sized;
+    /** can be turned into an ident */
+    fn descr_for_ident(&self) -> String;
     /** a description that can be used in a list */
     fn description_for_list(&self) -> String;
     /** set the data from a hashmap of values. This can assume that all data is ok, or just return error*/
     fn set_data(&mut self, vals: &HashMap<String, String>, world: &mut World) -> NullResult;
     /** set the data from YAML data */
-    fn set_from_yaml(&mut self, yaml: serde_yaml::Value, world: &mut World) -> NullResult;
+    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult;
+    /** transitional to fix old data */
+    fn fix_data(
+        &self,
+        yaml: &serde_yaml::Value,
+        base: &mut ItemBase,
+        world: &mut World,
+    ) -> NullResult;
     /** do an action */
     fn do_action(
         &mut self,
@@ -658,7 +700,32 @@ impl ItemType {
     ) -> ActionResponse {
         self.policy.check_valid(base, vals, world)
     }
-    /** resolve any conflicts between versions (eg server ls local) */
+    /* resolve any conflicts between versions (eg server vs local).
+
+        There are three possible versions of the item:
+
+        * the *ancestor* version (the most recent common ancestor of 'our' and 'their' versions);
+        * *'our'* version (the version currently in the program), and
+        * *'their'* version (the version retrieved from the remote repository).
+
+        Of these,
+
+        * at least one must be present;
+        * if there is an 'our' version and a 'their' version, there will be an ancestor version as well.
+
+        If there is an ancestor version, it may or may not be the same as the 'our' version or the 'their' version.
+
+        In some cases, the 'our' version will be correct already and we do not need to do anything.
+
+        Otherwise, we may need to:
+
+        * change the 'our' version to incorporate changes to the 'their' version;
+        * delete the 'our' version; or
+        * create a new version (when there is no 'our' version but there is a 'their' version).
+
+    The [`Conflict`] contains all three versions.
+
+    Any resulting changes to 'our' are to be placed in the [`ChangeList`].  */
     pub fn resolve_conflict(
         &self,
         world: &mut World,
@@ -669,39 +736,46 @@ impl ItemType {
         trace(&format!("conflict detected {:#?}", &conflict));
         // for now, do something simple
         match &conflict.our {
-            None => Ok(()),
+            None => match &conflict.their {
+                None => Ok(()), // item was in ancestor but we and server have both deleted it
+                Some(t) => match &conflict.ancestor {
+                    None => {
+                        // item has been added in remote
+                        let (tib, tv) = split_data_parts(&t.data)?;
+                        let type_name = tib.type_name.clone();
+                        let item_type_rcrc = world.get_item_type(type_name.to_string())?;
+                        let item_type = item_type_rcrc.deref().borrow();
+                        let item_data_boxed = item_type.from_yaml(&tv, world)?;
+                        Item::change_using_parts(
+                            &tib.type_name,
+                            &tib,
+                            item_data_boxed,
+                            &t.path,
+                            changes,
+                            world,
+                        )?;
+                        Ok(())
+                    }
+                    Some(_a) => Ok(()), // we have deleted it, don't add it back
+                },
+            },
             Some(o) => {
                 let (oib, ov) = split_data_parts(&o.data)?;
-                // let mut os = Simple::new();
-                // os.set_from_yaml_basic(ov)?;
                 match &conflict.their {
-                    None => Ok(()),
+                    None => Ok(()), // we have it but not the remote
                     Some(t) => {
                         let (_tib, tv) = split_data_parts(&t.data)?;
                         match &conflict.ancestor {
-                            None => Ok(()),
+                            None => Ok(()), // we have created it, keep
                             Some(a) => {
+                                // item modified locally or in remote
                                 let (_aib, av) = split_data_parts(&a.data)?;
-                                //     let mut ts = Simple::new();
-                                //     ts.set_from_yaml_basic(tv)?;
-                                //     os.name = merge_strings(&os.name, &ts.name);
-                                //     os.text = merge_strings(&os.text, &ts.text);
-                                //     trace(&format!("merged to {} and {}", os.name, os.text));
-                                //     // let item_type_rcrc = world.get_item_type(oib.type_name.clone())?;
-                                //     //    let item = Item:: from_parts(oib, item_type_rcrc  , Box::new(os));
-                                //     //    let merged_yaml = item.to_yaml()?;
-                                //     //    let change = taipo_git_control::Change::new(
-                                //     //        taipo_git_control::ObjectOperation::Modify(String::from_utf8_lossy(  &merged_yaml).to_string()),
-                                //     //        o.path.clone(),
-                                //     //        "resolve conflict".to_owned(),
-                                //     //    );
-                                //     //    changes.push(change);
-                                // }
-                                let ib = self.policy.resolve_conflict_both(world, av, ov, tv)?;
+                                let item_data_boxed =
+                                    self.policy.resolve_conflict_both(world, &av, &ov, &tv)?;
                                 Item::change_using_parts(
                                     &oib.type_name,
                                     &oib,
-                                    ib,
+                                    item_data_boxed,
                                     &o.path,
                                     changes,
                                     world,
@@ -713,6 +787,10 @@ impl ItemType {
                 }
             }
         }
+    }
+    /** get item data from serde value */
+    pub fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
+        self.policy.from_yaml(values, world)
     }
 }
 /** ref counted reference to an [`ItemType`] */
@@ -730,13 +808,14 @@ pub trait ItemTypePolicy: Debug {
     //     conflict: &Conflict,
     //     changes: &mut ChangeList,
     // ) -> NullResult;
-    /** generate changes to resolve a merge conflict where both version have the item */
+    /** generate changes to resolve a merge conflict where both
+    versions ('ours' and 'theirs') contain the item */
     fn resolve_conflict_both(
         &self,
         world: &mut World,
-        ancestor: Value,
-        ours: Value,
-        theirs: Value,
+        ancestor: &Value,
+        ours: &Value,
+        theirs: &Value,
     ) -> FLResult<Box<dyn ItemData>>;
     /** check whether the Item can be updated using the specified values. It needs to return any errors if any user-supplied value is wrong.
      */
@@ -746,6 +825,8 @@ pub trait ItemTypePolicy: Debug {
         vals: &HashMap<String, String>,
         world: &mut World,
     ) -> ActionResponse;
+    /** get item data from serde value */
+    fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>>;
 }
 /** simple enum, each [`ItemKind`] has an [`ItemType`]*/
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
@@ -927,6 +1008,10 @@ impl ItemListEntryList {
     pub fn has_entries(&self) -> bool {
         !self.entries.is_empty()
     }
+    /** number of entries in list */
+    pub fn num_entries(&self) -> usize {
+        self.entries.len()
+    }
     /** create from a list of [`ItemLink`]s */
     pub fn from_links(links: &mut Vec<ItemLink>, world: &mut World) -> Self {
         Self::from_vec(
@@ -935,6 +1020,33 @@ impl ItemListEntryList {
                 .map(|l| ItemListEntry::from_link(l, world).unwrap())
                 .collect(),
         )
+    }
+    /** */
+    pub fn filter_on_item<P>(&mut self, mut predicate: P, world: &mut World) -> FLResult<Self>
+    where
+        P: FnMut(&mut Item, &mut World) -> FLResult<bool>,
+    {
+        self.filter_on_entry(
+            |ie, world| {
+                let item_rcrc = ItemLink::from(ie.link.clone()).resolve_link(world)?;
+                let mut item = item_rcrc.deref().borrow_mut();
+                predicate(&mut item, world)
+            },
+            world,
+        )
+    }
+    /** */
+    pub fn filter_on_entry<P>(&mut self, mut predicate: P, world: &mut World) -> FLResult<Self>
+    where
+        P: FnMut(&mut ItemListEntry, &mut World) -> FLResult<bool>,
+    {
+        let mut list: Vec<ItemListEntry> = vec![];
+        for ie in &mut self.entries {
+            if predicate(ie, world)? {
+                list.push(ie.clone());
+            }
+        }
+        Ok(Self::from_vec(list))
     }
 }
 /** an identifier (actually a String) */
@@ -1013,12 +1125,17 @@ impl ItemLink {
     pub fn resolve_link(&mut self, world: &mut World) -> FLResult<ItemRef> {
         match &self.data {
             ItemLinkData::Unresolved(id) => {
-                let ir = world.get_item(id.to_string())?;
+                let ir = world.get_item(id.to_string(), "Simple".to_string())?;
                 self.data = ItemLinkData::Resolved(ItemWeakRef::from(&ir));
                 Ok(ir)
             }
             ItemLinkData::Resolved(ir) => ir.to_rcrc(),
         }
+    }
+}
+impl PartialEq for ItemLink {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident().unwrap_or("?".to_string()) == other.ident().unwrap_or("??".to_string())
     }
 }
 
@@ -1125,7 +1242,7 @@ impl ShowBaseTemplate {
     /** fill in fields */
     pub fn from_base(base: &mut ItemBase, world: &mut World) -> FLResult<Self> {
         let parent = base.parent_for_display(world)?;
-        let children = base.get_item_children(world)?;
+        let children = base.get_open_children(world)?;
         let has_children = !children.entries.is_empty();
         Ok(Self {
             ident: base.get_ident(),
@@ -1152,7 +1269,7 @@ mod tests {
         let item_type = super::ItemType::new(Box::new(crate::simple::SimpleTypePolicy {}));
         reg.register(item_type);
         let _item_type2 = reg.get(super::ItemKind::Simple)?;
-        // TODO code me:   assert_eq!(item_type.clone().borrow().mark, item_type2.borrow().mark); // make sense?
+        // TODO code:   assert_eq!(item_type.clone().borrow().mark, item_type2.borrow().mark); // make sense?
         Ok(())
     }
 }

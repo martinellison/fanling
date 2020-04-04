@@ -14,6 +14,11 @@ var doAction = function(aVal, tVal, iVal) {
     };
     invoke(c);
 };
+var doActionWithIdent = function(aVal, tVal, iVal, iVal2) {
+    var a = {};
+    a[aVal] = iVal2;
+    doAction(a, tVal, iVal);
+};
 {% match interface_type %}
 {% when crate::InterfaceType::PC %}
 // code for PC platform
@@ -26,7 +31,9 @@ var invoke = function(arg) {
 var invoke = function(arg) {
     console.log("\ninvoking from Android with " + JSON.stringify(arg));
     taipo.execute(JSON.stringify(arg));
+    console.log("execute done");
     if (taipo.response_ok()) {
+        console.log("response ok from execute");
         var nri =  taipo.response_num_items();
         for (i = 0 ; i < nri; i++) {
             let ri = taipo.response_item(i);
@@ -36,6 +43,7 @@ var invoke = function(arg) {
             setTag(key, value);
         }
     } else {
+        console.log("system error found: " + taipo.response_error());
         alert( taipo.response_error());
         console.log("error: " + taipo.response_error());
     }

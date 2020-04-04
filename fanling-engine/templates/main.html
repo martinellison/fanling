@@ -1,31 +1,54 @@
 <!DOCTYPE html>
-<html> <!-- for {{ interface_type_string }} -->
-  
+<html>
+  <!-- for {{ interface_type_string }} -->
+
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no" />
     <style>
       {% include "fanling.css" %}
     </style>
   </head>
-  
-  
+
   <body>
-    <div id='error' class='error'></div>
-    <input type=button onclick='doAction("New", "Simple", "")' value='New simple' />
-    <input type=button onclick='doAction("New", "Task", "")' value='New task' />
-    <input type=button onclick='doAction("ListReady", "", "")'
-	   value='list ready' />
-    <div id=content>Welcome to Fanling</div>
-    <div id=always></div>
-    <hr/>
+    <div id="error" class="error"></div>
+    <input
+      type="button"
+      onclick='doAction("New", "Simple", "")'
+      value="New simple"
+    />
+    <input
+      type="button"
+      onclick='doAction("New", "Task", "")'
+      value="New task"
+    />
+    <input
+      type="button"
+      onclick='doAction("ListReady", "", "")'
+      value="list ready"
+    />
+    <input
+      type="button"
+      onclick='doAction("ListOpen", "", "")'
+      value="list open"
+    />
+    <input
+      type="button"
+      onclick='doAction("ListAll", "", "")'
+      value="list all"
+    />
+    <div id="content">Welcome to Fanling</div>
+    <div id="always"></div>
+    <hr />
     <h3>Debugging</h3>
-    <input type=button onclick='doAction("GetAll", "", "")' value='Get all' />
-    <input type=button onclick='doAction("CheckData", "", "")'
-           value='Check data' />
+    <input type="button" onclick='doAction("GetAll", "", "")' value="Get all" />
+    <input
+      type="button"
+      onclick='doAction("CheckData", "", "")'
+      value="Check data"
+    />
     <script>
       {% include "code.js" %}
     </script>
   </body>
-
 </html>

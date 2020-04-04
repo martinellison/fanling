@@ -64,12 +64,14 @@ macro_rules! dump_error {
         match $err {
             Ok(x) => x,
             Err(e) => {
+                //  trace(&format!("error found at {} ({})", file!(), line!()));
                 let re = RepoError::from(e);
                 re.dump(file!(), line!(), column!());
                 if !cfg!(android) {
                     panic!("git error");
                 }
-                return Err(repo_error!("should not come here"));
+                //return Err(repo_error!("should not come here"));
+                return Err(re);
             }
         }
     };

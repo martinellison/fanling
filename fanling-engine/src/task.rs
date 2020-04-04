@@ -16,6 +16,7 @@ use ansi_term::Colour;
 use askama::Template;
 use chrono::offset::TimeZone;
 use chrono::{NaiveDateTime, Utc};
+use fanling_interface::error_response_result;
 use log::trace;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
@@ -181,6 +182,35 @@ impl Task {
         // self.when_closed = Utc::now().naive_utc();
         Ok(())
     }
+    /** block this task by the task with the `ident` */
+    fn block(&mut self, ident: &str) -> NullResult {
+        self.blockedby.push(ItemLink::new(ident.to_string()));
+        // TODO: checks; prevent duplications
+        Ok(())
+    }
+    /** unblock this task by the task with the `ident` */
+    fn unblock(&mut self, ident: &str) -> NullResult {
+        self.blockedby.retain(|il| il.ident().unwrap() != ident);
+        Ok(())
+    }
+    #[cfg(test)]
+    fn set_test_data(
+        &mut self,
+        resp: &mut fanling_interface::Response,
+        base: &mut ItemBase,
+        world: &mut World,
+    ) {
+        resp.set_test_data("ident", &base.get_ident());
+        resp.set_test_data(
+            "ready",
+            if self.is_ready(world).unwrap() {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        resp.set_test_data("open", if self.is_open() { "true" } else { "false" });
+    }
 }
 impl crate::item::ItemData for Task {
     fn for_edit(
@@ -192,6 +222,7 @@ impl crate::item::ItemData for Task {
         let broken_text = self.text.replace("\n", "&#10;");
         trace(&format!("{} converted to {}", self.text, broken_text));
         let contexts = self.get_contexts(world)?;
+        let blockedby = ItemListEntryList::from_links(&mut self.blockedby, world);
         let nt = NewTaskTemplate {
             data: &self,
             base: NewBaseTemplate::from_base(base, is_for_update, world)?,
@@ -202,7 +233,7 @@ impl crate::item::ItemData for Task {
             when_closed: self.when_closed,
             deadline: self.deadline,
             show_after_date: self.show_after_date,
-            blockedby: ItemListEntryList::from_vec(vec![]), /* TODO: code */
+            blockedby,
         };
         let mut resp = fanling_interface::Response::new();
         resp.clear_errors(vec![
@@ -212,7 +243,10 @@ impl crate::item::ItemData for Task {
             "".to_owned(),
         ]);
         resp.add_tag("content", &(nt.render()?));
-        resp.set_ident(base.get_ident());
+        #[cfg(test)]
+        {
+            self.set_test_data(&mut resp, base, world);
+        }
         trace(&format!("for edit {:?}", &resp));
         Ok(resp)
     }
@@ -233,13 +267,18 @@ impl crate::item::ItemData for Task {
             deadline: self.deadline,
             show_after_date: self.show_after_date,
             blockedby: ItemListEntryList::from_links(&mut self.blockedby, world),
-            potential_blockers: world.search_ready_hier()?,
+            potential_blockers: world.search_open_hier()?,
         };
         let mut resp = fanling_interface::Response::new();
         resp.add_tag("content", &(t.render()?));
+        #[cfg(test)]
+        {
+            self.set_test_data(&mut resp, base, world);
+        }
         trace(&format!("for show {:?}", &resp));
         Ok(resp)
     }
+
     fn to_yaml(&self, base: &crate::item::ItemBase) -> Result<Vec<u8>, FanlingError> {
         let for_serde = TaskItemForSerde {
             base: crate::item::ItemBaseForSerde::from_base(base)?,
@@ -255,18 +294,40 @@ impl crate::item::ItemData for Task {
             TaskStatus::Closed => false,
         }
     }
-    fn is_ready(&self) -> bool {
+    fn is_ready(&mut self, world: &mut World) -> FLResult<bool> {
         if !self.is_open() {
-            return false;
+            trace("task is not ready because not open");
+            return Ok(false);
         }
         let now = Utc::now().naive_utc();
         if self.show_after_date != NaiveDateTime::from_timestamp(0, 0)
             && self.show_after_date.cmp(&now) == Ordering::Greater
         {
-            return false;
+            trace("task is not ready because before show-after date");
+            return Ok(false);
         }
-        // TODO finish coding (blocking)
-        true
+        for bi in &mut self.blockedby {
+            let bir = bi.resolve_link(world)?;
+            let bi = bir.deref().borrow();
+            if bi.is_open() {
+                trace(&format!(
+                    "task is not ready because blocked by {}",
+                    bi.ident()
+                ));
+                return Ok(false);
+            } else {
+                trace(&format!(
+                    "task is not blocked by {} because not open",
+                    bi.ident()
+                ));
+            }
+        }
+        trace("task is ready");
+        Ok(true)
+    }
+    /** can be turned into an ident */
+    fn descr_for_ident(&self) -> String {
+        self.name.clone()
     }
     /** an English-language description */
     fn description(&self) -> String {
@@ -301,7 +362,8 @@ impl crate::item::ItemData for Task {
         };
         self.context = match vals.get("context") {
             Some(c) => {
-                let context_link: ItemLink = ItemLink::from(world.get_item(c.to_string())?);
+                let context_link: ItemLink =
+                    ItemLink::from(world.get_item(c.to_string(), "Simple".to_string())?);
                 trace(&format!(
                     "from {:?} made context link {:?} in set data",
                     &c, &context_link
@@ -312,15 +374,15 @@ impl crate::item::ItemData for Task {
         };
         self.deadline = match vals.get("deadline") {
             Some(dl) => Utc.datetime_from_str(dl, "%F %T")?.naive_utc(),
-            _ => return Err(fanling_error!("unvalidated bad date")),
+            _ => NaiveDateTime::from_timestamp(0, 0),
         };
         self.show_after_date = match vals.get("show_after_date") {
             Some(dl) => Utc.datetime_from_str(dl, "%F %T")?.naive_utc(),
-            _ => return Err(fanling_error!("unvalidated bad date")),
+            _ => NaiveDateTime::from_timestamp(0, 0),
         };
         Ok(())
     }
-    fn set_from_yaml(&mut self, yaml: serde_yaml::Value, world: &mut World) -> NullResult {
+    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult {
         //    *self = serde_yaml::from_value(yaml)?;
         trace("setting task from yaml...");
         let mut tfs = TaskForSerde::default();
@@ -337,7 +399,6 @@ impl crate::item::ItemData for Task {
         world: &mut World,
     ) -> fanling_interface::ResponseResult {
         match &action {
-            // TODO block and unblock
             crate::Action::Close => {
                 self.close(world)?;
                 Ok(self.for_show(base, world)?)
@@ -346,9 +407,15 @@ impl crate::item::ItemData for Task {
                 self.reopen(world)?;
                 Ok(self.for_show(base, world)?)
             }
-            crate::Action::BlockBy(_ident) => unimplemented!(),
-            crate::Action::UnblockBy(_ident) => unimplemented!(),
-            _ => panic!("invalid action {:?}", action),
+            crate::Action::BlockBy(ident) => {
+                self.block(&ident)?;
+                Ok(self.for_show(base, world)?)
+            }
+            crate::Action::UnblockBy(ident) => {
+                self.unblock(&ident)?;
+                Ok(self.for_show(base, world)?)
+            }
+            _ => error_response_result(&format!("invalid action {:?}", action)),
         }
     }
     /** copy from another item data. But status is Open and no blockers. */
@@ -365,6 +432,38 @@ impl crate::item::ItemData for Task {
             show_after_date: self.show_after_date,
             blockedby: vec![],
         }))
+    }
+    /** transitional code to fix some old data */
+    fn fix_data(
+        &self,
+        yaml: &serde_yaml::Value,
+        base: &mut ItemBase,
+        world: &mut World,
+    ) -> NullResult {
+        //  trace("fixing task data...");
+        if let Some(project) = yaml.get("project") {
+            //   trace("task has project");
+            if let Some(project_name) = project.as_str() {
+                if !base.has_parent() && !project_name.is_empty() {
+                    trace(&format!(
+                        "no parent and task has project '{}'",
+                        &project_name
+                    ));
+                    let parent_item_rcrc =
+                        world.get_item(project_name.to_owned(), "Task".to_owned())?;
+                    let parent_item = parent_item_rcrc.deref().borrow();
+                    let parent_link = ItemLink::from(&*parent_item);
+                    trace(&format!(
+                        "setting parent for '{}' to '{}'",
+                        base.get_ident(),
+                        parent_item.ident(),
+                    ));
+                    base.set_parent(Some(parent_link));
+                    assert_ne!("??", base.get_ident());
+                }
+            }
+        }
+        Ok(())
     }
 }
 /** task item in a form that can be serialised */
@@ -447,8 +546,8 @@ impl Default for TaskForSerde {
 }
 impl TaskForSerde {
     /** set from YAML data */
-    fn set_from_yaml(&mut self, yaml: serde_yaml::Value) -> NullResult {
-        *self = serde_yaml::from_value(yaml)?;
+    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value) -> NullResult {
+        *self = serde_yaml::from_value(yaml.clone())?;
         self.fix_data();
         Ok(())
     }
@@ -457,7 +556,6 @@ impl TaskForSerde {
         if self.closed {
             self.status = TaskStatus::Closed;
         }
-        // TODO project -> parent
     }
 }
 impl TryFrom<&Task> for TaskForSerde {
@@ -469,7 +567,9 @@ impl TryFrom<&Task> for TaskForSerde {
             context: task
                 .context
                 .as_ref()
-                .ok_or_else(|| fanling_error!("no context found from task"))?
+                .ok_or_else(|| {
+                    fanling_error!(&format!("no context found from task: {:#?}", &task))
+                })?
                 .ident()?,
             status: task.status.clone(),
             priority: task.priority.clone(),
@@ -542,9 +642,9 @@ impl crate::item::ItemTypePolicy for TaskTypePolicy {
     fn resolve_conflict_both(
         &self,
         world: &mut World,
-        _ancestor: Value,
-        ours: Value,
-        theirs: Value,
+        _ancestor: &Value,
+        ours: &Value,
+        theirs: &Value,
     ) -> FLResult<Box<dyn ItemData>> {
         let mut ots = TaskForSerde::default();
         ots.set_from_yaml(ours)?;
@@ -554,7 +654,22 @@ impl crate::item::ItemTypePolicy for TaskTypePolicy {
         let tt = Task::task_from(&mut tts, world)?;
         ot.name = merge_strings(&ot.name, &tt.name);
         ot.text = merge_strings(&ot.text, &tt.text);
-        // TODO: other fields
+        //   ot.context = "";
+        if ot.status == TaskStatus::Open {
+            if tt.status == TaskStatus::Closed {
+                ot.status = TaskStatus::Closed;
+                ot.when_closed = tt.when_closed;
+            }
+        }
+        ot.priority = std::cmp::min(ot.priority, tt.priority);
+        //  ot.project = "";
+        ot.deadline = std::cmp::min(ot.deadline, tt.deadline);
+        ot.show_after_date = std::cmp::min(ot.show_after_date, tt.show_after_date);
+        for t in tt.blockedby {
+            if !ot.blockedby.contains(&t) {
+                ot.blockedby.push(t);
+            }
+        }
         Ok(Box::new(ot))
     }
     fn check_valid(
@@ -587,6 +702,13 @@ impl crate::item::ItemTypePolicy for TaskTypePolicy {
             "Invalid show-after date",
         );
         ar
+    }
+    /** get item data from serde value */
+    fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
+        let mut ts = TaskForSerde::default();
+        ts.set_from_yaml(values)?;
+        let t = Task::task_from(&mut ts, world)?;
+        Ok(Box::new(t))
     }
 }
 /** convenience function for debug traces */

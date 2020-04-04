@@ -79,7 +79,6 @@ impl Search {
                 type_name: &itemx.type_name(),
                 name: &itemx.description(),
                 open: itemx.is_open(),
-                ready: itemx.is_ready(),
                 parent,
                 sort: &itemx.get_sort(),
                 classify: itemx.classify(),
@@ -87,6 +86,7 @@ impl Search {
                 targeted: itemx.targeted(),
             },
         )?)
+        // TODO: create in other tables
     }
     /** remove an [`Item`] from the set of searchable values */
     pub fn delete_item(&mut self, item: ItemRef) -> NullResult {
@@ -94,6 +94,7 @@ impl Search {
         let ident = itemx.ident();
         let num_deleted = diesel::delete(dsl::item.find(&ident)).execute(&self.connect)?;
         assert_eq!(1, num_deleted);
+        // TODO: delete from other tables
         trace(&format!("deleted item '{:?}' from search", &ident));
         Ok(())
     }
@@ -107,7 +108,6 @@ impl Search {
             .set((
                 dsl::name.eq(itemx.description()),
                 dsl::open.eq(itemx.is_open()),
-                dsl::ready.eq(itemx.is_ready()),
                 dsl::parent.eq(itemx.parent_ident()),
                 dsl::sort.eq(itemx.get_sort()),
                 dsl::classify.eq(itemx.classify()),
@@ -115,12 +115,23 @@ impl Search {
                 dsl::targeted.eq(itemx.targeted()),
             ))
             .execute(&self.connect)?;
+        // TODO: update other tables
         trace(&format!("updated item '{:?}' in search", &ident));
         Ok(())
     }
     /** search everything  */
     pub fn search_all(&self) -> FLResult<ItemListEntryList> {
         let results = models::search_all(&self.connect)?;
+        let iter = ItemListEntryList {
+            entries: results.entries,
+            final_adjust_level: "".to_owned(),
+        };
+        Ok(iter)
+    }
+    /** search everything with hierarchy */
+    pub fn search_all_hier(&self) -> FLResult<ItemListEntryList> {
+        let results = models::search_all_hier(&self.connect)?;
+        trace(&format!("hier found {} entries", results.entries.len()));
         let iter = ItemListEntryList {
             entries: results.entries,
             final_adjust_level: "".to_owned(),
@@ -145,9 +156,9 @@ impl Search {
         };
         Ok(iter)
     }
-    /** search for children */
-    pub fn search_ready_children(&self, parent_ident: &str) -> FLResult<ItemListEntryList> {
-        let results = models::search_ready_children(&self.connect, parent_ident)?;
+    /** search for children with open status */
+    pub fn search_open_children(&self, parent_ident: &str) -> FLResult<ItemListEntryList> {
+        let results = models::search_open_children(&self.connect, parent_ident)?;
         let iter = ItemListEntryList {
             entries: results.entries,
             final_adjust_level: "".to_owned(),
@@ -155,8 +166,8 @@ impl Search {
         Ok(iter)
     }
     /** search everything for ready with hierarchy */
-    pub fn search_ready_hier(&self) -> FLResult<ItemListEntryList> {
-        let results = models::search_ready_hier(&self.connect)?;
+    pub fn search_open_hier(&self) -> FLResult<ItemListEntryList> {
+        let results = models::search_open_hier(&self.connect)?;
         trace(&format!("hier found {} entries", results.entries.len()));
         let iter = ItemListEntryList {
             entries: results.entries,

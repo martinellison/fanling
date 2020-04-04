@@ -3,7 +3,6 @@ CREATE TABLE item (
        type_name VARCHAR NOT NULL,
        name VARCHAR NOT NULL,
        open BOOLEAN NOT NULL DEFAULT(1),
-       ready BOOLEAN NOT NULL DEFAULT(1),
        parent VARCHAR DEFAULT NULL,
        sort VARCHAR NOT NULL,
        classify VARCHAR NOT NULL,
@@ -11,7 +10,6 @@ CREATE TABLE item (
        targeted BOOLEAN NOT NULL DEFAULT(0)
      );
 CREATE UNIQUE INDEX item_open ON item (open, sort, ident) WHERE open;
-CREATE UNIQUE INDEX item_ready ON item (ready, special, sort, ident) WHERE ready;
 CREATE INDEX item_classify ON item (classify, open, name) WHERE classify != 'normal';
 CREATE INDEX item_special ON item (special, open, name) WHERE special != 0;
 CREATE INDEX item_child ON item (parent, open);
@@ -50,7 +48,6 @@ CREATE TABLE item_by_level_copy2(
  type_name VARCHAR NOT NULL,
  name VARCHAR NOT NULL,
  open BOOLEAN NOT NULL,
- ready BOOLEAN NOT NULL,
  parent VARCHAR,
  sort VARCHAR NOT NULL,
  classify VARCHAR NOT NULL,

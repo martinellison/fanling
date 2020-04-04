@@ -35,8 +35,8 @@ impl Simple {
             text: "".to_owned(),
         }
     }
-    fn set_from_yaml_basic(&mut self, yaml: serde_yaml::Value) -> NullResult {
-        *self = serde_yaml::from_value(yaml)?;
+    fn set_from_yaml_basic(&mut self, yaml: &serde_yaml::Value) -> NullResult {
+        *self = serde_yaml::from_value(yaml.clone())?;
         // self.fix_data();
         Ok(())
     }
@@ -58,7 +58,10 @@ impl crate::item::ItemData for Simple {
         let mut resp = fanling_interface::Response::new();
         resp.clear_errors(vec!["name-error".to_owned()]);
         resp.add_tag("content", &(nt.render()?));
-        resp.set_ident(base.get_ident());
+        #[cfg(test)]
+        {
+            resp.set_test_data("ident", &base.get_ident());
+        }
         trace(&format!("for edit {:?}", &resp));
         Ok(resp)
     }
@@ -89,8 +92,12 @@ impl crate::item::ItemData for Simple {
     fn is_open(&self) -> bool {
         true
     }
-    fn is_ready(&self) -> bool {
-        true
+    fn is_ready(&mut self, _world: &mut World) -> FLResult<bool> {
+        Ok(true)
+    }
+    /** can be turned into an ident */
+    fn descr_for_ident(&self) -> String {
+        self.name.clone()
     }
     /** an English-language description */
     fn description(&self) -> String {
@@ -111,8 +118,8 @@ impl crate::item::ItemData for Simple {
         }
         Ok(())
     }
-    fn set_from_yaml(&mut self, yaml: serde_yaml::Value, _world: &mut World) -> NullResult {
-        *self = serde_yaml::from_value(yaml)?;
+    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, _world: &mut World) -> NullResult {
+        *self = serde_yaml::from_value(yaml.clone())?;
         Ok(())
     }
     /** do action for simple -- should never get called */
@@ -133,6 +140,23 @@ impl crate::item::ItemData for Simple {
             text: self.text.clone(),
         }))
     }
+    /** transitional to fix old data */
+    fn fix_data(
+        &self,
+        _yaml: &serde_yaml::Value,
+        _base: &mut ItemBase,
+        _world: &mut World,
+    ) -> NullResult {
+        Ok(())
+    }
+}
+impl Default for Simple {
+    fn default() -> Self {
+        Self {
+            name: "".to_owned(),
+            text: "".to_owned(),
+        }
+    }
 }
 #[derive(Serialize, Deserialize)]
 struct SimpleForSerde {
@@ -141,23 +165,6 @@ struct SimpleForSerde {
     #[serde(flatten)]
     data: Simple,
 }
-// impl SimpleForSerde {
-//     /** create a new [`SimpleForSerde`]  */
-//     pub fn new() -> Self {
-//         Self {
-//             name: "".to_owned(),
-//             text: "".to_owned(),
-//         }
-//     }
-//     /** set from YAML data */
-//     //     // /** ensure consistency of the data */
-//     //     // fn fix_data(&mut self) {
-//     //     //     if self.closed {
-//     //     //         self.status = TaskStatus::Closed;
-//     //     //     }
-//     //     //     // TODO project -> parent
-//     //     // }
-// }
 /** template data for creating a new simple item */
 #[derive(Template)]
 #[template(path = "new-simple.html", print = "none")]
@@ -198,14 +205,14 @@ impl crate::item::ItemTypePolicy for SimpleTypePolicy {
     fn resolve_conflict_both(
         &self,
         _world: &mut World,
-        _ancestor: Value,
-        ours: Value,
-        theirs: Value,
+        _ancestor: &Value,
+        ours: &Value,
+        theirs: &Value,
     ) -> FLResult<Box<dyn ItemData>> {
         let mut os = Simple::new();
-        os.set_from_yaml_basic(ours)?;
+        os.set_from_yaml_basic(&ours)?;
         let mut ts = Simple::new();
-        ts.set_from_yaml_basic(theirs)?;
+        ts.set_from_yaml_basic(&theirs)?;
         os.name = merge_strings(&os.name, &ts.name);
         os.text = merge_strings(&os.text, &ts.text);
         Ok(Box::new(os))
@@ -223,6 +230,12 @@ impl crate::item::ItemTypePolicy for SimpleTypePolicy {
             "Name must be non-blank.",
         );
         ar
+    }
+    /** get item data from serde value */
+    fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
+        let mut s = Simple::default();
+        s.set_from_yaml(&values, world)?;
+        Ok(Box::new(s))
     }
 }
 
