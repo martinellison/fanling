@@ -1,6 +1,6 @@
 [package]
 name = "fanling10"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["martin <m.e@acm.org>"]
 edition = "2018"
 
@@ -14,11 +14,11 @@ fanling-engine = { path = "../fanling-engine" }
 fanling-interface = { path = "../fanling-interface" }
 log = "0.4.8"
 quick-error = "1.2.3"
-rust-embed = "5.5.0"
-serde = "1.0.104"
-serde_derive = "1.0.104"
-serde_json = "1.0.48"
-structopt = "0.3.11"
+rust-embed = "5.5.1"
+serde = "1.0.106"
+serde_derive = "1.0.106"
+serde_json = "1.0.50"
+structopt = "0.3.12"
 taipo-git-control = { path = "../taipo-git-control" }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

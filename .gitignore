@@ -17,7 +17,6 @@ Cargo.lock
 doc/*.html
 fanling-engine/testfiles*
 taipo-git-control/testfiles/testrep2.git/
-test
 testfiles
 testfiles/testrep2.git/
 tools

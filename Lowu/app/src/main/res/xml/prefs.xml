@@ -50,5 +50,10 @@
             android:key="slurp_ssh"
             android:summary="Slurp SSH"
             android:title="Slurp SSH" />
+        <CheckBoxPreference
+            android:defaultValue="false"
+            android:key="auto_link"
+            android:summary="Auto link"
+            android:title="Auto link" />
     </PreferenceCategory>
 </PreferenceScreen>

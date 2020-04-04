@@ -20,7 +20,6 @@ pub struct DslItem {
     _type_name: String,
     name: String,
     _open: bool,
-    _ready: bool,
     _parent: Option<String>,
     _sort: String,
     _classify: String,
@@ -45,7 +44,6 @@ pub struct NewItem<'a> {
     pub type_name: &'a str,
     pub name: &'a str,
     pub open: bool,
-    pub ready: bool,
     pub parent: Option<&'a str>,
     pub sort: &'a str,
     pub classify: String,
@@ -110,12 +108,12 @@ pub fn search_special(conn: &SqliteConnection, sk: SpecialKind) -> FLResult<Item
     ))
 }
 /** */
-pub fn search_ready_children(
+pub fn search_open_children(
     conn: &SqliteConnection,
     parent_ident: &str,
 ) -> FLResult<ItemListEntryList> {
     let results = item::dsl::item
-        .filter(item::columns::ready.and(item::columns::parent.eq(parent_ident)))
+        .filter(item::columns::open.and(item::columns::parent.eq(parent_ident)))
         .load::<DslItem>(conn)?;
     let ilev: Vec<ItemListEntry> = results.into_iter().map(DslItem::into).collect();
     Ok(ItemListEntryList::from_vec(ilev))
@@ -133,7 +131,6 @@ pub struct DslItemHier {
     _type_name: String,
     name: String,
     _open: bool,
-    _ready: bool,
     _parent: Option<String>,
     _sort: String,
     _classify: String,
@@ -151,8 +148,14 @@ impl Into<ItemListEntry> for DslItemHier {
     }
 }
 
-/** find all ready items in the database in hierarchy */
-pub fn search_ready_hier(conn: &SqliteConnection) -> FLResult<ItemListEntryList> {
+/** find all items in the database in hierarchy */
+pub fn search_all_hier(conn: &SqliteConnection) -> FLResult<ItemListEntryList> {
+    let results = item_by_level::dsl::item_by_level.load::<DslItemHier>(conn)?;
+    let ilev: Vec<ItemListEntry> = results.into_iter().map(DslItemHier::into).collect();
+    Ok(ItemListEntryList::from_vec(ilev))
+}
+/** find all open items in the database in hierarchy */
+pub fn search_open_hier(conn: &SqliteConnection) -> FLResult<ItemListEntryList> {
     let results = item_by_level::dsl::item_by_level
         .filter(item_by_level::columns::open)
         .load::<DslItemHier>(conn)?;

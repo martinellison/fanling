@@ -34,10 +34,15 @@ public class MainActivity extends AppCompatActivity {
     private WebView mWebView;
     private static final int RESULT_SETTINGS = 1;
 
+    private String appStatus = "initial";
+    private final String APP_STATUS = "appState";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         Log.d(TAG, "on create...");
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) appStatus = savedInstanceState.getString(APP_STATUS);
+        Log.d(TAG, "app status is " + appStatus);
         setContentView(R.layout.activity_main);
         Toolbar toolbar = findViewById(R.id.toolbar);
         toolbar.setTitle("Fanling10");
@@ -49,21 +54,22 @@ public class MainActivity extends AppCompatActivity {
         td = taiposwig.taiposwig.make_data(jsonOptions().toString());
         Log.d(TAG, "data made.");
 
-               WebView mWebView = findViewById(R.id.webview);
+        mWebView = findViewById(R.id.webview);
         WebSettings webSettings = mWebView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         mWebView.addJavascriptInterface(new WebAppInterface(this), "taipo");
         //!!! add some code here to set platform-specific javascript (look at the PC version)
         mWebView.setWebViewClient(new WebViewClient());
-
-                Log.d(TAG, "web view set");
-        String ih = taiposwig.taiposwig.initial_html(td);
-        Log.d(TAG, "have initial html");
+        Log.d(TAG, "web view set");
+       // if (savedInstanceState != null) mWebView.restoreState(savedInstanceState);
+        if (appStatus.equals("initial")) {
+            String ih = taiposwig.taiposwig.initial_html(td);
+            Log.d(TAG, "have initial html, displaying...");
 //     Log.d(TAG, "initial html: "+ih);
-        mWebView.loadData(ih, null, null);
-
+            mWebView.loadData(ih, null, null);
+            appStatus = "started";
+        }
         taiposwig.taiposwig.handle_event(td, CCycleEvent.Start);
-
         Log.d(TAG, "on create done");
     }
 
@@ -72,19 +78,20 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
         Log.d(TAG, "in main using: " + PreferenceManager.getDefaultSharedPreferencesName(getBaseContext()));
         if (sp.getString("unique_prefix", "") == "") {
-        SharedPreferences.Editor ed = sp.edit();
-        ed.putString("database_path", getApplicationContext().getDataDir() + "/search.db");
-                ed.putString("git_path", getApplicationContext().getDataDir() + "/test2.git");
-               ed.putString("git_branch", "master");
+            SharedPreferences.Editor ed = sp.edit();
+            ed.putString("database_path", getApplicationContext().getDataDir() + "/search.db");
+            ed.putString("git_path", getApplicationContext().getDataDir() + "/test2.git");
+            ed.putString("git_branch", "master");
             ed.putBoolean("git_has_url", true);
-        ed.putString("git_url", "git@test.jennyemily.hk:martin/data1.git");
-        ed.putString("git_name", "martin");
-        ed.putString("git_email", "m.e@acm.org");
-        ed.putString("unique_prefix", "x");
-        ed.putString("ssh_path", getApplicationContext().getDataDir() + "/id_rsa");
-        ed.putBoolean("slurp_ssh", true);
-        ed.apply();
-        Log.d(TAG, "set initial preferences.");
+            ed.putString("git_url", "git@test.jennyemily.hk:martin/data1.git");
+            ed.putString("git_name", "martin");
+            ed.putString("git_email", "m.e@acm.org");
+            ed.putString("unique_prefix", "x");
+            ed.putString("ssh_path", getApplicationContext().getDataDir() + "/id_rsa");
+            ed.putBoolean("slurp_ssh", true);
+            ed.putBoolean("auto_link", false);
+            ed.apply();
+            Log.d(TAG, "set initial preferences.");
         } else {
             Log.d(TAG, "preferences already set");
         }
@@ -106,11 +113,31 @@ public class MainActivity extends AppCompatActivity {
             json.put("unique_prefix", sp.getString("unique_prefix", "??"));
             json.put("ssh_path", sp.getString("ssh_path", "??"));
             json.put("slurp_ssh", sp.getBoolean("slurp_ssh", true));
+            json.put("auto_link", sp.getBoolean("auto_link", false));
             Log.d(TAG, "options set, prefix is " + sp.getString("unique_prefix", "??"));
         } catch (JSONException e) {
             e.printStackTrace();
         }
         return json;
+    }
+
+    @Override
+    public void onRestoreInstanceState(Bundle savedState) {
+        Log.d(TAG, "restoring instance state...");
+        super.onRestoreInstanceState(savedState);
+        String restoredState = savedState.getString(APP_STATUS);
+        if (restoredState != appStatus)
+            Log.e(TAG, "restored state is  " + restoredState + " but current state is " + appStatus);
+       mWebView.restoreState(savedState);
+    }
+
+    @Override
+    public void onSaveInstanceState(Bundle outState) {
+        Log.d(TAG, "saving instance state...");
+        outState.putString(APP_STATUS, appStatus);
+       if (mWebView == null) Log.e(TAG, "no web view, cannot save");
+       else mWebView.saveState(outState);
+        super.onSaveInstanceState(outState);
     }
 
     @Override
@@ -214,8 +241,9 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void execute(String body) {
             taiposwig.taiposwig.execute(td, body);
+            Log.d(TAG, "execute done [from Java].");
             if (taiposwig.taiposwig.is_shutdown_required(td)) {
-                Log.d(TAG, "shutdown required!");
+                Log.d(TAG, "shutdown required! [from Java]");
                 finish();
             }
         }

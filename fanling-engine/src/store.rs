@@ -159,18 +159,20 @@ impl Store {
     /** get the raw data for the item, both the parts common to all types of item and the parts specific to this kind of item. */
     pub fn get_item_parts(&self, ident: &Ident) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
         fanling_trace!(&format!("getting parts of '{}'", ident));
-        assert_ne!(ident, "", "Ident is blank");
-        //   let data = self.repo.blob_from_path(&self.path_from_ident(ident))?;
+        assert!(!ident.is_empty(), "Ident is blank when getting item parts");
         let data = self.get_serialised(ident)?;
-        // let serde_value: serde_yaml::Value = serde_yaml::from_slice(&data)?;
-        // let base: ItemBaseForSerde = serde_yaml::from_value(serde_value.clone())?;
-        // trace("got parts.");
-        // Ok((base, serde_value.clone()))
         crate::item::split_data_parts(&data)
     }
     /** get the serialised data for an item */
     fn get_serialised(&self, ident: &Ident) -> FLResult<Vec<u8>> {
-        Ok(self.repo.blob_from_path(&self.path_from_ident(ident))?)
+        let vec_res = self.repo.blob_from_path(&self.path_from_ident(ident));
+        trace("result from bfp");
+        if let Err(e) = &vec_res {
+            fanling_trace!("error result");
+            trace(&format!("error was {:?}", e));
+        }
+        trace(&format!("as serialised {:?}", &vec_res));
+        Ok(vec_res?)
     }
     /** create an [`Item`] from YAML and add it to the known map. */
     pub fn make_known(&mut self, item_rcrc: ItemRef) -> FLResult<ItemRef> {

@@ -4,67 +4,77 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /* colours from http://paletton.com/#uid=10b0u0kmRmRn24bn7d0lqvjkAR7 * */
 
-html, body {
-     background-color: #682E1D;
-     color: #ffffff;
-     font-family: sans-serif;
-     font-size: 1em;
-     min-height: 100vh;
+html,
+body {
+  background-color: #682e1d;
+  color: #ffffff;
+  font-family: sans-serif;
+  font-size: 1em;
+  min-height: 100vh;
 }
- h1, h2, h3, h4, h5 {
-     color: #ff805b;
+h1,
+h2,
+h3,
+h4,
+h5 {
+  color: #ff805b;
 }
- a {
-     color: #ff805b;
-     text-decoration: underline;
+a {
+  color: #ff805b;
+  text-decoration: underline;
 }
- a.big {
-     padding: 1em;
-     margin: 1em;
+a.big {
+  padding: 1em;
+  margin: 1em;
 }
- th {
-     text-align: left;
+th {
+  text-align: left;
 }
- td, p, li {
-     color: #F97853;
-     font-size: 1em;
+td,
+p,
+li {
+  color: #f97853;
+  font-size: 1em;
 }
- tr.alert {
-     color: #210f09;
-     background-color: #ff805b;
-     font-weight: bold;
+tr.alert {
+  color: #210f09;
+  background-color: #ff805b;
+  font-weight: bold;
 }
- tr.alert a {
-     color: #210f09;
+tr.alert a {
+  color: #210f09;
 }
- textarea {
-     height: 100%;
-     width: 95%;
-     color: #210f09;
-     font-family: sans-serif;
-     font-size: 1em;
+textarea {
+  height: 100%;
+  width: 95%;
+  color: #210f09;
+  font-family: sans-serif;
+  font-size: 1em;
 }
- input, select {
-     color: #210f09;
-     font-family: sans-serif;
-     font-size: 1em;
+input,
+select {
+  color: #210f09;
+  font-family: sans-serif;
+  font-size: 1em;
 }
- li.block {
-     color: #ffffff;
+li.block {
+  color: #ffffff;
 }
- div.error {
-     font-weight: bold;
-     font-size: 200%;
+div.error {
+  font-weight: bold;
+  font-size: 200%;
 }
- @media handheld {
-     html, body {
-         margin: 0.2em;
-         padding: 0.2em;
-         float: none;
-    }
- }
-  /* Remove default bullets */
-ul, #myUL {
+@media handheld {
+  html,
+  body {
+    margin: 0.2em;
+    padding: 0.2em;
+    float: none;
+  }
+}
+/* Remove default bullets */
+ul,
+#myUL {
   list-style-type: none;
 }
 
@@ -104,10 +114,10 @@ ul, #myUL {
 }
 
 span.itemlink {
-    text-decoration: underline;
-    color: #ff805b;
+  text-decoration: underline;
+  color: #ff805b;
 }
 span.itemlink:hover {
-    cursor: pointer;
-    color: #F97853;
+  cursor: pointer;
+  color: #f97853;
 }

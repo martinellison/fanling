@@ -16,7 +16,7 @@ can result in a merge conflict. It is the user's responsibility to
 resolve this before any further use of the system, by applying the
 necesary changes.
 
-* TODO example tests; cover all main cases including merge conflicts
+* FUTURE example tests; cover all main cases including merge conflicts
 
 Some code copied from [here](https://zsiciarz.github.io/24daysofrust/book/vol2/day16.html)
 

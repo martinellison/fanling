@@ -63,6 +63,7 @@ mod task;
 mod world;
 use crate::item::ItemBaseForSerde;
 pub use crate::shared::{FLResult, FanlingError, NullResult, Tracer};
+use fanling_interface::error_response_result;
 use log::trace;
 pub use search::SearchOptions;
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,8 @@ pub enum Action {
     Archive,
     //   Search, /* needs search criteria */
     ListReady,
+    ListOpen,
+    ListAll,
     New,
     NewChild(item::Ident),
     Create(ItemBaseForSerde, HashMap<String, String>),
@@ -104,15 +107,14 @@ pub enum Action {
 impl Action {
     fn kind(&self) -> ActionKind {
         match self {
-            Action::Shutdown |   Action::PushAndQuit { force: _ } => {
-                ActionKind::Engine
-            }
+            Action::Shutdown | Action::PushAndQuit { force: _ } => ActionKind::Engine,
             Action::Start
             | Action::Pull
             | Action::Create(_, _)
             | Action::Update(_, _)
-//            | Action::Search
             | Action::ListReady
+            | Action::ListOpen
+            | Action::ListAll
             | Action::Delete
             | Action::GetAll
             | Action::CheckData
@@ -124,8 +126,9 @@ impl Action {
             | Action::Edit
             | Action::Archive
             | Action::Close
-            | Action::Reopen |  Action::BlockBy(_) |
-    Action::UnblockBy(_)=> ActionKind::Item,
+            | Action::Reopen
+            | Action::BlockBy(_)
+            | Action::UnblockBy(_) => ActionKind::Item,
             Action::Unknown => panic!("unknown action"),
         }
     }
@@ -233,7 +236,7 @@ impl FanlingEngine {
         match basic_request.action {
             Action::Shutdown => self.shutdown(),
             Action::PushAndQuit { force } => self.push_and_shutdown(force),
-            _ => panic!("invalid action {:?}", basic_request.action),
+            _ => error_response_result(&format!("invalid action {:?}", basic_request.action)),
         }
     }
     fn push_and_shutdown(&mut self, force: bool) -> fanling_interface::ResponseResult {
@@ -254,15 +257,16 @@ impl FanlingEngine {
 }
 impl fanling_interface::Engine for FanlingEngine {
     fn execute(&mut self, body: &str) -> fanling_interface::ResponseResult {
-        fanling_trace!(&format!("executing «{}»", &body));
+        fanling_trace!(&format!("executing action «{}»", &body));
         let now = SystemTime::now();
-        let json_result = serde_json::from_str(&body);
-        let json_value: serde_json::value::Value = match json_result {
+        let json_body = serde_json::from_str(&body);
+        let json_value: serde_json::value::Value = match json_body {
             Err(e) => {
+                let msg = format!("fanling error: {:?}", &e);
                 let re = FanlingError::from(e);
                 re.dump(file!(), line!(), column!());
                 if !cfg!(android) {
-                    panic!("fanling error");
+                    panic!(msg);
                 } else {
                     serde_json::value::Value::default()
                 }
@@ -270,22 +274,22 @@ impl fanling_interface::Engine for FanlingEngine {
             Ok(v) => v,
         };
         //dump_fanling_error!(serde_json::from_str(&body));
-        trace("getting basic request from JSON");
+        fanling_trace!("getting basic request from JSON");
         let basic_request: BasicRequest = serde_json::from_value(json_value.clone())?;
-        trace(&format!(
-            "action: basic request {:?}, kind {:?}",
+        fanling_trace!(&format!(
+            "starting execute action: basic request {:?}, kind {:?}",
             basic_request,
             basic_request.action.kind()
         ));
         let res = match basic_request.action.kind() {
             ActionKind::Engine => self.do_engine_action(&basic_request),
-            ActionKind::World | // ActionKind::ItemType |
-            ActionKind::Item => {
+            ActionKind::World | ActionKind::Item => {
                 self.world.do_action(&basic_request, json_value)
             }
         };
+        fanling_trace!("action done");
         trace(&format!(
-            "execute {:?} took {}s ", //giving {:?}",
+            "execute action done, {:?} took {}s ", //giving {:?}",
             basic_request.action,
             now.elapsed()?.as_millis() as f64 / 1000.0,
             //     &res
