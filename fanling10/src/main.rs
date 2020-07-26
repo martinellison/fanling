@@ -179,6 +179,7 @@ fn actual_main() -> NullResult {
     }
     // let _extra_js = " /* extra js goes here  ";
     let options = fanling_engine::EngineOptions {
+        correct: true,
         repo_options: taipo_git_control::RepoOptions {
             path: opt.repo.clone().into_boxed_path(),
             name: opt.name.clone(),

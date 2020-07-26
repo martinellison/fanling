@@ -51,6 +51,7 @@ pub(crate) fn check_test_data(
 }
 pub(crate) fn simple_options(test_dir: &str, database_path: &str) -> super::EngineOptions {
     super::EngineOptions {
+        correct: true,
         repo_options: taipo_git_control::RepoOptions {
             path: PathBuf::from(test_dir).into_boxed_path(),
             name: "tester".to_string(),
@@ -94,6 +95,7 @@ pub(crate) fn test_engine(
     let _ = fs::remove_file(&database2_path);
 
     let options = super::EngineOptions {
+        correct: true,
         repo_options: taipo_git_control::RepoOptions {
             url: Some(url),
             path: PathBuf::from(test_dir2).into_boxed_path(),
@@ -121,7 +123,11 @@ pub(crate) fn check_engine(
 ) -> crate::shared::NullResult {
     trace(&format!("testing engine ({})", engine.trace_descr()));
     //  let ident = "aaa-o2";
-    let (item_base, item_values) = engine.world.get_item_parts(&test_ident.to_owned())?;
+    let (item_base, item_values) = engine
+        .world
+        .as_ref()
+        .expect("no world")
+        .get_item_parts(&test_ident.to_owned())?;
     assert_eq!(test_ident, item_base.ident);
     match item_values.get(field_key) {
         None => {

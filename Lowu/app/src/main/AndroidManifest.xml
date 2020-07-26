@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="hk.jennyemily.work.lowu">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -9,6 +12,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <activity
+            android:name=".LoadSSHActivity"
+            android:label="@string/title_activity_load_ssh"
+            android:theme="@style/AppTheme.NoActionBar"></activity>
         <activity
             android:name=".PreferencesActivity"
             android:label="@string/title_activity_preferences"
@@ -29,8 +36,5 @@
             </intent-filter>
         </activity>
     </application>
-    <uses-permission android:name="android.permission.INTERNET" />
-
-    <uses-permission android:name="android.permission.BLUETOOTH" />
 
 </manifest>

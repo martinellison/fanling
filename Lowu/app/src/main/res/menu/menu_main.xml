@@ -1,5 +1,4 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     tools:context="hk.jennyemily.work.lowu.MainActivity">
 
@@ -7,4 +6,8 @@
         android:id="@+id/menuSettings"
         android:orderInCategory="100"
         android:title="Settings" />
+    <item
+        android:id="@+id/menuLoadSSH"
+        android:orderInCategory="110"
+        android:title="Load SSH keys" />
 </menu>

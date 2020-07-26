@@ -18,8 +18,11 @@ use log::trace;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::Deref;
+use std::panic;
+use std::panic::AssertUnwindSafe;
 //#[macro_use]
 use crate::fanling_error;
+// use std::any::Any;
 
 /** FUTURE: check that repo "file names" (within the repo) are the same as in fanling9 namely `items/_ident_.page`
 */
@@ -294,7 +297,19 @@ impl Store {
     }
     /** fetch from server */
     pub fn fetch(&mut self) -> NullResult {
-        Ok(self.repo.fetch()?)
+        trace("fetching (store)");
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            let fr = self.repo.fetch();
+            trace(&format!("fetch (store) result {:#?}", fr));
+            Ok(fr?)
+        }));
+        match result {
+            Ok(fr) => fr,
+            Err(_e) => {
+                trace(&format!("fetch (store) failed"));
+                Err(fanling_error!(&format!("fetch (store) failed")))
+            }
+        }
     }
     /** merge the versions and determine the status (no change/fast forward/conflict) */
     pub fn merge(&mut self) -> FLResult<MergeOutcome> {

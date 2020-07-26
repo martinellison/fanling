@@ -8,13 +8,13 @@ edition = "2018"
 
 [dependencies]
 ansi_term = "0.12.1"
-chrono = "0.4.11"
-color-backtrace = "0.3.0"
-dirs = "2.0.2"
-git2 = "0.13.1"
-git2_credentials = "0.6.0"
+chrono = "0.4.12"
+color-backtrace = "0.4.2"
+dirs = "3.0.0"
+git2 = "0.13.6"
+git2_credentials = "0.6.1"
 hex-slice = "0.1.4"
-openssl = { version = "0.10.28", features = ["vendored"] }
+openssl = { version = "0.10.30", features = ["vendored"] }
 quick-error = "1.2.3"
 rand = "0.7.3"
 # time = "0.2.6"

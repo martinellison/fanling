@@ -51,7 +51,7 @@ impl Default for RepoOptions {
             email: "".to_owned(),
             url: None,
             required_remote: Some("origin".to_owned()),
-            required_branch: Some("master".to_owned()),
+            required_branch: Some("main".to_owned()),
             item_dir: "items".to_owned(),
             write_to_server: false,
             ssh_path: PathBuf::from(SSL_KEY_FILE).into_boxed_path(), /* ?? */

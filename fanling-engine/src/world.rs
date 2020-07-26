@@ -64,8 +64,10 @@ impl<'a> World {
         // if new_db {
         //     world.get_all()?;
         // }
-        trace("fetching changes...");
-        world.process_fetch_changes(repo_action_required)?;
+        if opts.repo_options.url.is_some() {
+            trace("fetching changes...");
+            world.process_fetch_changes(repo_action_required)?;
+        }
         trace("ensuring some items...");
         world.ensure_some_items()?;
         trace("created world.");
@@ -119,7 +121,13 @@ impl<'a> World {
     fn pull(&mut self) -> NullResult {
         fanling_trace!("pulling");
         if self.store.has_remote() {
-            self.store.fetch()?;
+            fanling_trace!("fetching");
+            let fr: NullResult = self.store.fetch();
+            if fr.is_err() {
+                trace(&format!("fetch was error ({:#?})", &fr));
+            }
+            fanling_trace!(&format!("fetch result {:#?}", &fr));
+            fr?;
             let mut merge_outcome = self.store.merge()?;
             trace(&format!("fetch result was {:?}", merge_outcome,));
             match merge_outcome {
@@ -526,6 +534,10 @@ impl<'a> World {
                 fanling_trace!("action done");
                 res
             }
+            crate::Action::TestError2 => {
+                trace("making world test error 2");
+                Err(Box::new(fanling_error!("test error 2")))
+            }
             _ => error_response_result(&format!("invalid action {:?}", basic_request.action)),
         }
     }
@@ -795,6 +807,10 @@ impl<'a> World {
     ) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
         let (base, values) = self.store.get_item_parts(ident)?;
         Ok((base, values))
+    }
+    /** generate an error for testing the user interface */
+    pub fn test_error(&self) -> FLResult<String> {
+        Err(fanling_error!("test error"))
     }
 }
 /** template data for a list of items */

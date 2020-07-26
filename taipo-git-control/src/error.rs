@@ -20,7 +20,7 @@ macro_rules! repo_error {
 quick_error! {
    #[derive(Debug)]
     /** Error found during repository management */
-    pub  enum RepoError {
+    pub enum RepoError {
         /// error found by git2
         Git(err: git2::Error) {from() cause(err)
                                                    description(err.description())}
@@ -47,7 +47,7 @@ impl RepoError {
     pub(crate) fn new(text: &str) -> RepoError {
         RepoError::Repo(text.to_owned())
     }
-    pub(crate) fn dump(&self, file: &str, line: u32, col: u32) -> &Self {
+    pub(crate) fn dump(&self, file: &str, line: u32, col: u32) {
         trace2(&format!(
             "repo error found: {} at {}:{}:{}",
             &format!("{:?}", &self).replace("\\n", "\n"),
@@ -55,7 +55,6 @@ impl RepoError {
             &line,
             &col
         ));
-        self
     }
 }
 

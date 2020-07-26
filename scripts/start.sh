@@ -22,7 +22,11 @@ else
             RUSTTOOLS="" 
             NETSPEED="slow"
             ;;
+        tarantula)
+            export RUST_SRC_PATH="$(rustc --print sysroot)/lib/rustlib/src/rust/src"
+            ;;
     esac
+    if [[ ! -d $BASE/testfiles ]] ; then mkdir $BASE/testfiles ; fi
     export DATABASE_URL=$BASE/testfiles/testdb.db
     if [[ "$NETSPEED" == "fast" || $START_TYPE == "all" ]] ; then
         echo "updating environment..."
@@ -30,10 +34,10 @@ else
     fi
     echo "pulling from git..."
     git pull
-    git clean -fX
+    # git clean -fX
     if [[ "$NETSPEED" == "fast" || $START_TYPE == "all" ]] ; then
         echo "updating crates..."
-        cargo upgrade --all
+        cargo upgrade --workspace
      #   cargo upgrade --aggressive
     fi
     echo "restoring old cargo"

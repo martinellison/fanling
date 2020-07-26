@@ -45,6 +45,13 @@ if [[ $? != 0 ]]; then exit 1; fi
 echo "building rust ($BUILDOPT) ..."
 cargo build $BUILDOPT
 if [[ $? != 0 ]]; then exit 1; fi
+echo "cbindgen..."
+CBINDGEN_TARG=$BASE/target/fanling-c-interface.h
+rm -f  fanling-c-interface.h
+cbindgen fanling-c-interface/src/lib.rs  --output $CBINDGEN_TARG --lang c
+if [[ $? != 0 ]]; then echo 'cbindgen error'; exit 1; fi
+if [[ ! -f  $CBINDGEN_TARG ]] ; then echo "no cbindgen"  $CBINDGEN_TARG ; exit 1 ; fi
+
 #export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.0.33-1.rolling.fc30.x86_64"
 #export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.1.9-2.rolling.fc30.x86_64"
 export JAVALOC="/usr/lib/jvm/java-13-openjdk-13.0.2.8-1.rolling.fc31.x86_64"
@@ -55,13 +62,6 @@ if [[ $? != 0 ]]; then exit 1; fi
 RUSTEXDIR=$BASE/target/debug/
 RUSTEX="$RUSTEXDIR/libfanling_c_interface.a"
 if [[ ! -f  $RUSTEX ]]; then echo "no so file"  $RUSTEX ; exit 0; fi
-
-echo "cbindgen..."
-CBINDGEN_TARG=$BASE/target/fanling-c-interface.h
-rm -f  fanling-c-interface.h
-cbindgen fanling-c-interface/src/lib.rs  --output $CBINDGEN_TARG --lang c
-if [[ $? != 0 ]]; then echo 'cbindgen error'; exit 1; fi
-if [[ ! -f  $CBINDGEN_TARG ]] ; then echo "no cbindgen"  $CBINDGEN_TARG ; exit 1 ; fi
 
 cp $RUSTEX .
 echo "swig..."

@@ -22,7 +22,7 @@ fn blob() -> super::NullResult {
         email: "m,e@acm.org".to_string(),
         url: None,
         item_dir: "items".to_string(),
-        required_branch: Some("master".to_string()),
+        required_branch: Some("main".to_string()),
         required_remote: Some("origin".to_string()),
         write_to_server: false,
         ssh_path: PathBuf::from("??").into_boxed_path(),
@@ -47,7 +47,7 @@ fn init() -> super::NullResult {
         email: "m,e@acm.org".to_string(),
         url: None,
         item_dir: "items".to_string(),
-        required_branch: Some("master".to_string()),
+        required_branch: Some("main".to_string()),
         required_remote: Some("origin".to_string()),
         write_to_server: false,
         ssh_path: PathBuf::from("??").into_boxed_path(),
@@ -65,7 +65,7 @@ fn open() -> super::NullResult {
         email: "m,e@acm.org".to_string(),
         url: None,
         item_dir: "items".to_string(),
-        required_branch: Some("master".to_string()),
+        required_branch: Some("main".to_string()),
         required_remote: Some("origin".to_string()),
         write_to_server: false,
         ssh_path: PathBuf::from("??").into_boxed_path(),
@@ -87,9 +87,9 @@ fn open() -> super::NullResult {
 //         path: PathBuf::from("testfiles/testrep2.git").into_boxed_path(),
 //         name: "tester".to_string(),
 //         email: "m.e@acm.org".to_string(),
-//         url: Some("git@test.jennyemily.hk:fanling/testrep2.git".to_owned()),
+//         url: Some("git@work.jennyemily.hk:fanling/testrep2.git".to_owned()),
 //         item_dir: "items".to_string(),
-//         required_branch: Some("master".to_string()),
+//         required_branch: Some("main".to_string()),
 //         required_remote: Some("origin".to_string()),
 //         write_to_server: true,
 //     };
@@ -159,14 +159,14 @@ fn open() -> super::NullResult {
 #[test]
 fn clone() -> super::NullResult {
     let _path = temp_repo_path();
-    const URL_STRING: &str = &"git@test.jennyemily.hk:fanling/testrep.git";
+    const URL_STRING: &str = &"git@work.jennyemily.hk:fanling/testrep.git";
     let opts = RepoOptions {
         path: temp_repo_path().into_boxed_path(),
         name: "tester".to_string(),
         email: "m,e@acm.org".to_string(),
         url: Some(URL_STRING.to_owned()),
         item_dir: "items".to_string(),
-        required_branch: Some("master".to_string()),
+        required_branch: Some("main".to_string()),
         required_remote: Some("origin".to_string()),
         write_to_server: true,
         ssh_path: PathBuf::from("/tmp/id_rsa").into_boxed_path(),

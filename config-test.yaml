@@ -6,10 +6,9 @@ verbose: true
 uniq_pfx: b
 debug: false
 item_dir: items
-repo_branch: master
+repo_branch: main
 auto_link: true
-url: git@test.jennyemily.hk:fanling/testrep2.git
+url: git@work.jennyemily.hk:fanling/testrep2.git
 no_write_to_server: false
-auto_link: true
 ssh_path: /home/martin/.ssh/id_rsa
 slurp_ssh: false

@@ -30,6 +30,7 @@ extern crate libc;
 // use std::cell::RefCell;
 use std::ffi::CStr;
 use std::ffi::CString;
+use std::ops::Deref;
 use std::os::raw::c_char;
 use std::path::PathBuf;
 //use taipo_git_control::RepoOptions;
@@ -42,6 +43,8 @@ extern crate log;
 extern crate android_log;
 use libc::c_int;
 use serde::Deserialize;
+use std::panic;
+use std::panic::AssertUnwindSafe;
 
 #[no_mangle]
 /// the main data, including the [`FanlingEngine`] data for the engine
@@ -93,6 +96,7 @@ impl CCycleEvent {
 }
 #[derive(Deserialize)]
 struct FanlingOptions {
+    pub correct: bool,
     pub database_path: String,
     pub git_path: String,
     pub name: String,
@@ -125,6 +129,7 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
         .expect("bad deserialise");
     debug!("...creating engine options...");
     let engine_options = EngineOptions {
+        correct: fanling_options.correct,
         repo_options: taipo_git_control::RepoOptions {
             path: PathBuf::from(fanling_options.git_path).into_boxed_path(),
             name: fanling_options.name,
@@ -149,15 +154,28 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
     debug!("options as read {:#?}", engine_options);
     debug!("making data in rust...");
     let mut msg = "Starting engine...".to_owned();
-    let engine = match FanlingEngine::new(&engine_options) {
+    let mut engine: Option<FanlingEngine> = None;
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        match FanlingEngine::new(&engine_options) {
+            Err(e) => {
+                error!("could not create engine - {:?}", e);
+                msg = format!("Error: {:?}", e);
+            }
+            Ok(e) => engine = Some(e),
+        };
+    }));
+    match result {
+        Ok(_) => (),
         Err(e) => {
-            error!("could not create engine - {:?}", e);
-            msg = format!("Error: {:?}", e);
-            None
-            //    panic!("bad engine")
+            trace!("making engine failed {:?}", e);
+            msg = match e.downcast_ref::<Box<String>>() {
+                Some(x) => format!("mee/{:?}", x),
+                None => format!("bad error {:?}", e.deref().type_id()),
+            };
+            trace!("msg is {}", msg);
+            // format!("making engine error {:?}", msg);
         }
-        Ok(e) => Some(e),
-    };
+    }
     debug!("got engine, making top level rust data...");
     let data = Box::into_raw(Box::new(LowuData {
         engine,
@@ -187,14 +205,26 @@ pub extern "C" fn execute(data: *mut LowuData, body: *const c_char) {
     let bs = string_from_c(body);
     debug!("executing {} [from rust-c]", bs);
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
-    match &mut d.engine {
-        Some(e) => d.last_response = e.execute(&bs),
-        None => {
-            debug!("no engine!");
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        match &mut d.engine {
+            Some(e) => d.last_response = e.execute(&bs),
+            None => {
+                debug!("no engine!");
+            }
+        }
+        debug!("executed [from rust-c]");
+        debug!("execution result {:?} [from rust-c]", d.last_response);
+    }));
+    match result {
+        Ok(_) => (),
+        Err(e) => {
+            trace!("execution failed {:?}", e);
+            d.last_response = Ok(fanling_interface::Response::new_error_with_tags(&[(
+                "error",
+                &format!("execute error {:?}", &e),
+            )]));
         }
     }
-    debug!("executed [from rust-c]");
-    debug!("execution result {:?} [from rust-c]", d.last_response);
 }
 
 // #[no_mangle]
@@ -212,12 +242,24 @@ pub extern "C" fn execute(data: *mut LowuData, body: *const c_char) {
 /// handles a life cycle event (just wraps the engine call)
 pub extern "C" fn handle_event(data: *mut LowuData, event: CCycleEvent) {
     let mut d = unsafe { data.as_mut().expect("bad pointer") };
-    debug!("handling event");
-    match &mut d.engine {
-        Some(e) => {
-            d.last_response = e.handle_event(&CCycleEvent::from_c(event));
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        debug!("handling event");
+        match &mut d.engine {
+            Some(e) => {
+                d.last_response = e.handle_event(&CCycleEvent::from_c(event));
+            }
+            None => {}
         }
-        None => {}
+    }));
+    match result {
+        Ok(_) => (),
+        Err(e) => {
+            trace!("handle event failed {:?}", e);
+            d.last_response = Ok(fanling_interface::Response::new_error_with_tags(&[(
+                "error",
+                &format!("life cycle error {:?}", &e),
+            )]));
+        }
     }
 }
 

@@ -53,6 +53,7 @@ extern crate fanling_interface;
 extern crate regex;
 extern crate rust_embed;
 pub extern crate taipo_git_control;
+//use std::panic::catch_unwind;
 mod item;
 mod markdown;
 mod search;
@@ -68,6 +69,8 @@ use log::trace;
 pub use search::SearchOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::panic;
+use std::panic::AssertUnwindSafe;
 use std::time::SystemTime;
 
 // #[macro_use]
@@ -103,11 +106,15 @@ pub enum Action {
     CheckData,
     BlockBy(item::Ident),
     UnblockBy(item::Ident),
+    TestError1,
+    TestError2,
 }
 impl Action {
     fn kind(&self) -> ActionKind {
         match self {
-            Action::Shutdown | Action::PushAndQuit { force: _ } => ActionKind::Engine,
+            Action::Shutdown | Action::PushAndQuit { force: _ } | Action::TestError1 => {
+                ActionKind::Engine
+            }
             Action::Start
             | Action::Pull
             | Action::Create(_, _)
@@ -121,7 +128,8 @@ impl Action {
             | Action::Push { force: _ }
             | Action::New
             | Action::Clone
-            | Action::NewChild(_) => ActionKind::World,
+            | Action::NewChild(_)
+            | Action::TestError2 => ActionKind::World,
             Action::Show
             | Action::Edit
             | Action::Archive
@@ -190,6 +198,8 @@ impl BasicRequest {
 /** options for an [Engine]. Some fields are passed down to components. */
 #[derive(Debug)]
 pub struct EngineOptions {
+    /** options have been specified */
+    pub correct: bool,
     /** options for the git system */
     pub repo_options: taipo_git_control::RepoOptions,
     /** type of user interface (PC or phone) */
@@ -211,7 +221,7 @@ pub enum InterfaceType {
 /** the engine of the application (common across platforms) */
 pub struct FanlingEngine {
     /** the model */
-    world: world::World,
+    world: Option<world::World>,
     // interface_callback: Option<fn(js: &str)>,
 }
 impl FanlingEngine {
@@ -225,7 +235,11 @@ impl FanlingEngine {
             opts.interface_type
         ));
         Ok(Self {
-            world: world::World::new_and_open(opts)?,
+            world: if opts.correct {
+                Some(world::World::new_and_open(opts)?)
+            } else {
+                None
+            },
         })
     }
     fn do_engine_action(
@@ -236,12 +250,26 @@ impl FanlingEngine {
         match basic_request.action {
             Action::Shutdown => self.shutdown(),
             Action::PushAndQuit { force } => self.push_and_shutdown(force),
+            Action::TestError1 => {
+                if let Some(world) = &self.world {
+                    trace("making world test error 1");
+                    Ok(fanling_interface::Response::new_error_with_tags(&[(
+                        "error",
+                        &world.test_error()?,
+                    )]))
+                } else {
+                    trace("no world, so no test error 1");
+                    Ok(fanling_interface::Response::new())
+                }
+            }
             _ => error_response_result(&format!("invalid action {:?}", basic_request.action)),
         }
     }
     fn push_and_shutdown(&mut self, force: bool) -> fanling_interface::ResponseResult {
         fanling_trace!("pushing and shutting down");
-        self.world.push(force)?;
+        if let Some(world) = &mut self.world {
+            world.push(force)?;
+        }
         self.shutdown()?;
         Ok(fanling_interface::Response::new())
     }
@@ -258,43 +286,57 @@ impl FanlingEngine {
 impl fanling_interface::Engine for FanlingEngine {
     fn execute(&mut self, body: &str) -> fanling_interface::ResponseResult {
         fanling_trace!(&format!("executing action «{}»", &body));
-        let now = SystemTime::now();
-        let json_body = serde_json::from_str(&body);
-        let json_value: serde_json::value::Value = match json_body {
-            Err(e) => {
-                let msg = format!("fanling error: {:?}", &e);
-                let re = FanlingError::from(e);
-                re.dump(file!(), line!(), column!());
-                if !cfg!(android) {
-                    panic!(msg);
-                } else {
-                    serde_json::value::Value::default()
+        let result = panic::catch_unwind(AssertUnwindSafe(move || {
+            let now = SystemTime::now();
+            let json_body = serde_json::from_str(&body);
+            let json_value: serde_json::value::Value = match json_body {
+                Err(e) => {
+                    let msg = format!("fanling error: {:?}", &e);
+                    let re = FanlingError::from(e);
+                    re.dump(file!(), line!(), column!());
+                    if !cfg!(android) {
+                        panic!(msg);
+                    } else {
+                        serde_json::value::Value::default()
+                    }
                 }
+                Ok(v) => v,
+            };
+            //dump_fanling_error!(serde_json::from_str(&body));
+            fanling_trace!("getting basic request from JSON");
+            let basic_request: BasicRequest = serde_json::from_value(json_value.clone())?;
+            fanling_trace!(&format!(
+                "starting execute action: basic request {:?}, kind {:?}",
+                basic_request,
+                basic_request.action.kind()
+            ));
+            let res = match basic_request.action.kind() {
+                ActionKind::Engine => self.do_engine_action(&basic_request),
+                ActionKind::World | ActionKind::Item => {
+                    if let Some(world) = &mut self.world {
+                        world.do_action(&basic_request, json_value)
+                    } else {
+                        Ok(fanling_interface::Response::new())
+                    }
+                }
+            };
+            fanling_trace!("action done");
+            trace(&format!(
+                "execute action done, {:?} took {}s ", //giving {:?}",
+                basic_request.action,
+                now.elapsed()?.as_millis() as f64 / 1000.0,
+                //     &res
+            ));
+            res
+        }));
+        match result {
+            Ok(res) => res,
+            Err(e) => {
+                let es = format!("execute error {:?}", e);
+                trace(&format!("ee/{}", es));
+                Err(Box::new(fanling_error!("error in execute")))
             }
-            Ok(v) => v,
-        };
-        //dump_fanling_error!(serde_json::from_str(&body));
-        fanling_trace!("getting basic request from JSON");
-        let basic_request: BasicRequest = serde_json::from_value(json_value.clone())?;
-        fanling_trace!(&format!(
-            "starting execute action: basic request {:?}, kind {:?}",
-            basic_request,
-            basic_request.action.kind()
-        ));
-        let res = match basic_request.action.kind() {
-            ActionKind::Engine => self.do_engine_action(&basic_request),
-            ActionKind::World | ActionKind::Item => {
-                self.world.do_action(&basic_request, json_value)
-            }
-        };
-        fanling_trace!("action done");
-        trace(&format!(
-            "execute action done, {:?} took {}s ", //giving {:?}",
-            basic_request.action,
-            now.elapsed()?.as_millis() as f64 / 1000.0,
-            //     &res
-        ));
-        res
+        }
     }
     fn handle_event(
         &mut self,
@@ -315,7 +357,11 @@ impl fanling_interface::Engine for FanlingEngine {
     fn initial_html(&self) -> fanling_interface::TPResult<String> {
         fanling_trace!("making initial html");
         let now = SystemTime::now();
-        let html = self.world.initial_html()?;
+        let html = if let Some(world) = &self.world {
+            world.initial_html()?
+        } else {
+            "please set the SSH keys and the preferences".to_owned()
+        };
         trace(&format!(
             "initial html took {}s",
             now.elapsed()?.as_millis() as f64 / 1000.0
@@ -332,7 +378,10 @@ impl fanling_interface::Engine for FanlingEngine {
     /** a description identifying the engine for use in diagnostic
     traces */
     fn trace_descr(&self) -> String {
-        self.world.trace_descr()
+        match &self.world {
+            Some(world) => world.trace_descr(),
+            None => "no world".to_owned(),
+        }
     }
 }
 impl Drop for FanlingEngine {

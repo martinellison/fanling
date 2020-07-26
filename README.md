@@ -1,3 +1,5 @@
+** See [issues after cutover]{}
+
 ## Introduction
 
 Fanling10 is is a version of fanling using rust.
@@ -20,7 +22,7 @@ Most of the code is written in Rust, and uses cross-platform
 crates. In particular, Git (or, rather, git2) is used to synchronise
 data across multiple installations, and sqlite is used to search a
 library. This means that the same data can be synchronised across
-multiple installations, even though they are on different platforms. 
+multiple installations, even though they are on different platforms.
 
 ### Different kinds of items
 

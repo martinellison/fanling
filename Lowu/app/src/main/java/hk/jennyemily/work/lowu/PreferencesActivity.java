@@ -19,9 +19,8 @@ import static android.util.Log.d;
 public class PreferencesActivity extends PreferenceActivity {
     private final static String TAG = "fanling10:PreferencesActivity";
     private static final String[] keys = {
-            "git_path",
-            "git_branch", "git_has_url", "git_url", "git_name", "git_email", "database_path",
-            "unique_prefix", "ssh_path", "slurp_ssh", "auto_link"
+            "correct", "git_path", "git_branch", "git_has_url", "git_url", "git_name", "git_email",
+            "database_path", "unique_prefix", "ssh_path", "slurp_ssh", "auto_link"
     };
     public final static int NOT_CHANGED_RESULT = RESULT_FIRST_USER;
     public final static int CHANGED_RESULT = RESULT_FIRST_USER + 1;
@@ -29,19 +28,6 @@ public class PreferencesActivity extends PreferenceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-       /* setContentView(R.layout.activity_preferences);
-        Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-
-        FloatingActionButton fab = findViewById(R.id.fab);
-        fab.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
-                        .setAction("Action", null).show();
-            }
-        });
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);*/
         addPreferencesFromResource(R.xml.prefs);
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
         Log.d(TAG, "as edited: " + getPreferenceManager().getSharedPreferencesName());

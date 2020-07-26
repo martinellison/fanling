@@ -51,17 +51,20 @@ public class MainActivity extends AppCompatActivity {
         setInitialPreferencesIfRequired();
 
         Log.d(TAG, "making data...");
-        td = taiposwig.taiposwig.make_data(jsonOptions().toString());
+        final String optionsString = jsonOptions().toString();
+        Log.d(TAG, "options as JSON: " + optionsString);
+        td = taiposwig.taiposwig.make_data(optionsString);
         Log.d(TAG, "data made.");
 
         mWebView = findViewById(R.id.webview);
+        mWebView.setVerticalScrollBarEnabled(true);
         WebSettings webSettings = mWebView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         mWebView.addJavascriptInterface(new WebAppInterface(this), "taipo");
         //!!! add some code here to set platform-specific javascript (look at the PC version)
         mWebView.setWebViewClient(new WebViewClient());
         Log.d(TAG, "web view set");
-       // if (savedInstanceState != null) mWebView.restoreState(savedInstanceState);
+        // if (savedInstanceState != null) mWebView.restoreState(savedInstanceState);
         if (appStatus.equals("initial")) {
             String ih = taiposwig.taiposwig.initial_html(td);
             Log.d(TAG, "have initial html, displaying...");
@@ -79,15 +82,16 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "in main using: " + PreferenceManager.getDefaultSharedPreferencesName(getBaseContext()));
         if (sp.getString("unique_prefix", "") == "") {
             SharedPreferences.Editor ed = sp.edit();
+            ed.putBoolean("correct", false);
             ed.putString("database_path", getApplicationContext().getDataDir() + "/search.db");
             ed.putString("git_path", getApplicationContext().getDataDir() + "/test2.git");
-            ed.putString("git_branch", "master");
-            ed.putBoolean("git_has_url", true);
-            ed.putString("git_url", "git@test.jennyemily.hk:martin/data1.git");
+            ed.putString("git_branch", "main");
+            ed.putBoolean("git_has_url", false);
+            ed.putString("git_url", "git@work.jennyemily.hk:martin/data1.git");
             ed.putString("git_name", "martin");
             ed.putString("git_email", "m.e@acm.org");
             ed.putString("unique_prefix", "x");
-            ed.putString("ssh_path", getApplicationContext().getDataDir() + "/id_rsa");
+            ed.putString("ssh_path", "id_rsa");
             ed.putBoolean("slurp_ssh", true);
             ed.putBoolean("auto_link", false);
             ed.apply();
@@ -103,18 +107,20 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
         Log.d(TAG, "in main using: " + PreferenceManager.getDefaultSharedPreferencesName(getBaseContext()));
         try {
+            json.put("correct", sp.getBoolean("correct", false));
             json.put("database_path", sp.getString("database_path", "??"));
             json.put("git_path", sp.getString("git_path", "??"));
             json.put("branch", sp.getString("git_branch", "??"));
-            json.put("have_url", sp.getBoolean("git_have_url", false));
+            json.put("have_url", sp.getBoolean("git_has_url", false));
             json.put("url", sp.getString("git_url", "??"));
             json.put("name", sp.getString("git_name", "??"));
             json.put("email", sp.getString("git_email", "??"));
             json.put("unique_prefix", sp.getString("unique_prefix", "??"));
-            json.put("ssh_path", sp.getString("ssh_path", "??"));
+            json.put("ssh_path", getApplicationContext().getFilesDir() + "/" + sp.getString("ssh_path", "??"));
             json.put("slurp_ssh", sp.getBoolean("slurp_ssh", true));
             json.put("auto_link", sp.getBoolean("auto_link", false));
-            Log.d(TAG, "options set, prefix is " + sp.getString("unique_prefix", "??"));
+            Log.d(TAG, "options set, prefix is " + sp.getString("unique_prefix", "??") + ", " + (
+                    sp.getBoolean("git_have_url", false) ? "no url" : ("url is " + sp.getString("git_url", "??"))));
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -128,15 +134,15 @@ public class MainActivity extends AppCompatActivity {
         String restoredState = savedState.getString(APP_STATUS);
         if (restoredState != appStatus)
             Log.e(TAG, "restored state is  " + restoredState + " but current state is " + appStatus);
-       mWebView.restoreState(savedState);
+        mWebView.restoreState(savedState);
     }
 
     @Override
     public void onSaveInstanceState(Bundle outState) {
         Log.d(TAG, "saving instance state...");
         outState.putString(APP_STATUS, appStatus);
-       if (mWebView == null) Log.e(TAG, "no web view, cannot save");
-       else mWebView.saveState(outState);
+        if (mWebView == null) Log.e(TAG, "no web view, cannot save");
+        else mWebView.saveState(outState);
         super.onSaveInstanceState(outState);
     }
 
@@ -182,15 +188,17 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
         int id = item.getItemId();
         switch (id) {
             case R.id.menuSettings:
                 Log.d(TAG, "settings clicked");
-                Intent intent = new Intent(MainActivity.this, PreferencesActivity.class);
-                startActivityForResult(intent, RESULT_SETTINGS);
+                Intent intentPreferences = new Intent(MainActivity.this, PreferencesActivity.class);
+                startActivityForResult(intentPreferences, RESULT_SETTINGS);
+                break;
+            case R.id.menuLoadSSH:
+                Log.d(TAG, "load files clicked");
+                Intent intentLoadFiles = new Intent(MainActivity.this, LoadSSHActivity.class);
+                startActivity(intentLoadFiles);
                 break;
             default:
                 Log.d(TAG, "some menu option selected");

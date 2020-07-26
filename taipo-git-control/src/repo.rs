@@ -19,6 +19,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str;
 //use std::time::Duration;
+use std::fs;
 use std::thread;
 use std::time::SystemTime;
 
@@ -91,6 +92,7 @@ impl FanlingRepository {
     fn init(opts: &RepoOptions) -> RepoResult<FanlingRepository> {
         let path = opts.path.clone();
         repo_timer!(&format!("init repo {:?}", path));
+        fs::create_dir_all(path.clone())?;
         let r = dump_error!(Repository::init_bare(path));
         Ok(Self::new(r, opts)?)
     }
@@ -122,6 +124,7 @@ impl FanlingRepository {
             .url
             .clone()
             .ok_or_else(|| repo_error!("URL must be specified for clone"))?;
+        fs::create_dir_all(opts.path.clone())?;
         trace(&format!(
             "actually cloning (url {:?}) to {:?}...",
             url, &opts.path
@@ -145,7 +148,7 @@ impl FanlingRepository {
             required_branch: opts
                 .required_branch
                 .as_ref()
-                .unwrap_or(&"master".to_owned())
+                .unwrap_or(&"main".to_owned())
                 .to_string(),
             item_dir: opts.item_dir.clone(),
             path: opts.path.clone(),
@@ -536,6 +539,7 @@ impl FanlingRepository {
             &mut cb,
         )?;
         fetch_options.remote_callbacks(cb);
+        trace(&format!("finding remote: {}...", &self.required_remote));
         let mut remote = dump_error!(self.repo.find_remote(&self.required_remote));
         trace(&format!("fetching (branch: {})...", &self.required_branch));
         dump_error!(remote.fetch(&[&self.required_branch], Some(&mut fetch_options), None));
@@ -764,7 +768,9 @@ impl FanlingRepository {
                 self.required_branch, self.required_branch
             );
             let refspec = (if force { "+" } else { "" }).to_owned() + &base_refspec;
+            trace(&format!("actually pushing {})...", refspec.as_str(),));
             remote.push(&[refspec.as_str()], Some(&mut push_options))?;
+            trace("actually pushed.");
             //     self.needs_push = false;
         }
         trace("after push, clearing needs push...");
@@ -826,6 +832,15 @@ impl FanlingRepository {
                 panic!("too many ssh tries");
             }
             ch.try_next_credential(url, username, allowed)
+        });
+        cb.push_update_reference(|refer, reason_opt| {
+            let msg = if let Some(reason) = reason_opt {
+                format!("rejected because: {}", reason)
+            } else {
+                "accepted".to_string()
+            };
+            trace(&format!("push update reference ({}): {}", &refer, &msg));
+            Ok(())
         });
         Ok(())
     }

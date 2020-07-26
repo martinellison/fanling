@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:layout_behavior="@string/appbar_scrolling_view_behavior"
+    tools:context=".LoadSSHActivity"
+    tools:showIn="@layout/activity_load_ssh">
+
+    <EditText
+        android:id="@+id/editTextPrivateKey"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:hint="Enter the SSH private key here"
+        android:inputType="textMultiLine"
+        android:lines="5" />
+
+    <EditText
+        android:id="@+id/editTextPublicKey"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/editTextPrivateKey"
+        android:hint="Enter the SSH public key here"
+        android:inputType="textMultiLine"
+        android:lines="5" />
+
+    <Button
+        android:id="@+id/buttonAddFiles"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/editTextPublicKey"
+        android:text="Set keys" />
+</RelativeLayout>
