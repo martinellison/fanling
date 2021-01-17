@@ -8,19 +8,15 @@
     <PreferenceCategory
         android:summary="Git repository"
         android:title="Git repository">
-        <EditTextPreference
-            android:key="git_path"
-            android:summary="Path to local repository"
-            android:title="Local git path" />
-        <EditTextPreference
-            android:key="git_branch"
-            android:summary="Branch in local repository"
-            android:title="Git branch" />
         <CheckBoxPreference
             android:defaultValue="true"
             android:key="git_has_url"
             android:summary="Link to remote repository"
             android:title="Has remote" />
+        <EditTextPreference
+            android:key="git_branch"
+            android:summary="Branch in local repository"
+            android:title="Git branch" />
         <EditTextPreference
             android:key="git_url"
             android:summary="URL of remote repository"
@@ -37,19 +33,6 @@
     <PreferenceCategory
         android:summary="Other preferences"
         android:title="Other">
-        <EditTextPreference
-            android:key="database_path"
-            android:summary="Path to database"
-            android:title="Database path" />
-        <EditTextPreference
-            android:defaultValue="a"
-            android:key="unique_prefix"
-            android:summary="Unique prefix"
-            android:title="Prefix" />
-        <EditTextPreference
-            android:key="ssh_path"
-            android:summary="SSH path"
-            android:title="SSH path" />
         <CheckBoxPreference
             android:defaultValue="true"
             android:key="slurp_ssh"
@@ -60,5 +43,14 @@
             android:key="auto_link"
             android:summary="Auto link"
             android:title="Auto link" />
+        <EditTextPreference
+            android:key="repo_name"
+            android:summary="Name for local files"
+            android:title="Repo name" />
+        <EditTextPreference
+            android:defaultValue="a"
+            android:key="unique_prefix"
+            android:summary="Unique prefix"
+            android:title="Prefix" />
     </PreferenceCategory>
 </PreferenceScreen>

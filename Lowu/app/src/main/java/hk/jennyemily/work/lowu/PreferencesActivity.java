@@ -17,10 +17,10 @@ import android.util.Log;
 import static android.util.Log.d;
 
 public class PreferencesActivity extends PreferenceActivity {
-    private final static String TAG = "fanling10:PreferencesActivity";
+    private final static String TAG = "Lowu PreferencesActivity";
     private static final String[] keys = {
-            "correct", "git_path", "git_branch", "git_has_url", "git_url", "git_name", "git_email",
-            "database_path", "unique_prefix", "ssh_path", "slurp_ssh", "auto_link"
+            "correct",   "repo_name", "git_branch", "git_has_url", "git_url", "git_name", "git_email",
+             "unique_prefix",   "slurp_ssh", "auto_link"
     };
     public final static int NOT_CHANGED_RESULT = RESULT_FIRST_USER;
     public final static int CHANGED_RESULT = RESULT_FIRST_USER + 1;

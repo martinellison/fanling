@@ -4,6 +4,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /*! repository errors and results */
 use crate::shared::trace2;
+//use std::error::Error;
 #[macro_export]
 /** create an error with a string message */
 macro_rules! repo_error {
@@ -22,25 +23,24 @@ quick_error! {
     /** Error found during repository management */
     pub enum RepoError {
         /// error found by git2
-        Git(err: git2::Error) {from() cause(err)
-                                                   description(err.description())}
+        Git(err: git2::Error) {from() source(err) display("Git/{}",err)}
         /// error found by git control
-        Repo(text: String) {from() description(text)}
+        Repo(text: String) {from() display("Repo/{}", format!("{} at {}:{}",text, file!(), line!()))}
         /// internal IO error
-        Io(err: std::io::Error) {from() cause(err)
-                                                   description(err.description())}
+        Io(err: std::io::Error) {from() source(err)
+            display("{}",err)}
         /// internal string error
-        Utf8(err: std::str::Utf8Error) {from() cause(err)
-                                                   description(err.description())}
+        Utf8(err: std::str::Utf8Error) {from() source(err)
+            display("{}",err)}
         /// internal time error
-        Time(err: std::time::SystemTimeError)  {from() cause(err)
-                                                   description(err.description())}
+        Time(err: std::time::SystemTimeError)  {from() source(err)
+            display("{}",err)}
         /// internal conversion error
-        Convert(err: std::num::TryFromIntError)  {from() cause(err)
-                                                   description(err.description())}
+        Convert(err: std::num::TryFromIntError)  {from() source(err)
+            display("{}",err)}
         /// error on conversion from UTF8 bytes
-        Utf8string(err: std::string::FromUtf8Error)  {from() cause(err)
-                                                      description(err.description())}
+        Utf8string(err: std::string::FromUtf8Error)  {from() source(err)
+            display("{}",err)}
     }
 }
 impl RepoError {
@@ -63,13 +63,16 @@ macro_rules! dump_error {
         match $err {
             Ok(x) => x,
             Err(e) => {
-                //  trace(&format!("error found at {} ({})", file!(), line!()));
                 let re = RepoError::from(e);
+                let explain = format!("error found {:?} at {}:{}", &re, line!(), column!());
+                trace(&explain);
                 re.dump(file!(), line!(), column!());
-                if !cfg!(android) {
-                    panic!("git error");
+                #[cfg(not(target_os = "android"))]
+                {
+                    trace("panicking because error in git");
+                    panic!("git error".to_string());
                 }
-                //return Err(repo_error!("should not come here"));
+                #[cfg(target_os = "android")]
                 return Err(re);
             }
         }

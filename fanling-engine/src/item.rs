@@ -13,7 +13,7 @@ use bitfield::{bitfield_bitrange, Bit};
 use chrono::{NaiveDateTime, Utc};
 use serde::{de::Error, Deserializer};
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -151,11 +151,11 @@ impl Item {
     pub fn item_type(&self) -> ItemTypeRef {
         self.base.item_type.clone()
     }
-    /** set the Item from YAML data */
-    pub fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult {
-        fanling_trace!("setting from yaml");
-        self.data.set_from_yaml(&yaml, world)?;
-        //   self.data.fix_data(&yaml, &mut self.base, world)?;
+    /** set the Item from JSON data */
+    pub fn set_from_json(&mut self, json: &serde_json::Value, world: &mut World) -> NullResult {
+        fanling_trace!("setting from json");
+        self.data.set_from_json(&json, world)?;
+        //   self.data.fix_data(&json, &mut self.base, world)?;
         Ok(())
     }
     /** display for editing */
@@ -174,9 +174,9 @@ impl Item {
         fanling_trace!("for show");
         rr
     }
-    /** serialise the Item to YAML */
-    pub fn to_yaml(&self) -> Result<Vec<u8>, FanlingError> {
-        self.data.to_yaml(&self.base)
+    /** serialise the Item to JSON */
+    pub fn to_json(&self) -> Result<Vec<u8>, FanlingError> {
+        self.data.to_json(&self.base)
     }
     /** can be turned into an ident */
     pub fn descr_for_ident(&self) -> String {
@@ -255,10 +255,10 @@ impl Item {
         let item_type_rcrc = world.get_item_type(type_name.to_string())?;
         //  let os_box: Box<ItemData> = Box::new(os);
         let item = Self::from_parts(ib, item_type_rcrc, os_box)?;
-        let merged_yaml = item.to_yaml()?;
+        let merged_json = item.to_json()?;
         let change = taipo_git_control::Change::new(
             taipo_git_control::ObjectOperation::Modify(
-                String::from_utf8_lossy(&merged_yaml).to_string(),
+                String::from_utf8_lossy(&merged_json).to_string(),
             ),
             path.to_string(),
             "resolve conflict".to_owned(),
@@ -267,8 +267,8 @@ impl Item {
         Ok(())
     }
     /** */
-    pub fn fix_data(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult {
-        self.data.fix_data(yaml, &mut self.base, world)
+    pub fn fix_data(&mut self, json: &serde_json::Value, world: &mut World) -> NullResult {
+        self.data.fix_data(json, &mut self.base, world)
     }
     // #[cfg(test)]
     // /** generate some data useful in tests */
@@ -446,10 +446,10 @@ impl ItemBase {
     }
 }
 
-/** interpret the serialised data as YAML and set the [ItemBase]  */
-pub fn split_data_parts(data: &[u8]) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
-    let serde_value: serde_yaml::Value = dump_fanling_error!(serde_yaml::from_slice(data));
-    let base: ItemBaseForSerde = dump_fanling_error!(serde_yaml::from_value(serde_value.clone()));
+/** interpret the serialised data as JSON and set the [ItemBase]  */
+pub fn split_data_parts(data: &[u8]) -> FLResult<(ItemBaseForSerde, serde_json::Value)> {
+    let serde_value: serde_json::Value = dump_fanling_error!(serde_json::from_slice(data));
+    let base: ItemBaseForSerde = dump_fanling_error!(serde_json::from_value(serde_value.clone()));
     Ok((base, serde_value))
 }
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
@@ -613,8 +613,8 @@ pub trait ItemData: Debug {
         base: &mut ItemBase,
         world: &mut World,
     ) -> fanling_interface::ResponseResult;
-    /** convert the Item to YAML */
-    fn to_yaml(&self, base: &ItemBase) -> Result<Vec<u8>, FanlingError>;
+    /** convert the Item to JSON */
+    fn to_json(&self, base: &ItemBase) -> Result<Vec<u8>, FanlingError>;
     /** is the  [`Item`] open? */
     fn is_open(&self) -> bool;
     /**  is the  [`Item`] ready? */
@@ -629,12 +629,12 @@ pub trait ItemData: Debug {
     fn description_for_list(&self) -> String;
     /** set the data from a hashmap of values. This can assume that all data is ok, or just return error*/
     fn set_data(&mut self, vals: &HashMap<String, String>, world: &mut World) -> NullResult;
-    /** set the data from YAML data */
-    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult;
+    /** set the data from JSON data */
+    fn set_from_json(&mut self, json: &serde_json::Value, world: &mut World) -> NullResult;
     /** transitional to fix old data */
     fn fix_data(
         &self,
-        yaml: &serde_yaml::Value,
+        json: &serde_json::Value,
         base: &mut ItemBase,
         world: &mut World,
     ) -> NullResult;
@@ -660,7 +660,7 @@ pub struct ItemType {
 impl Clone for ItemType {
     /** clone the ItemType -- does not make sense as ItemTypes should be singletons (clone a reference counted pointer if necessary) */
     fn clone(&self) -> Self {
-        panic!("ItemType cannot be cloned")
+        panic!("ItemType cannot be cloned".to_string())
     }
 }
 impl ItemType {
@@ -745,7 +745,7 @@ impl ItemType {
                         let type_name = tib.type_name.clone();
                         let item_type_rcrc = world.get_item_type(type_name.to_string())?;
                         let item_type = item_type_rcrc.deref().borrow();
-                        let item_data_boxed = item_type.from_yaml(&tv, world)?;
+                        let item_data_boxed = item_type.from_json(&tv, world)?;
                         Item::change_using_parts(
                             &tib.type_name,
                             &tib,
@@ -789,8 +789,8 @@ impl ItemType {
         }
     }
     /** get item data from serde value */
-    pub fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
-        self.policy.from_yaml(values, world)
+    pub fn from_json(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
+        self.policy.from_json(values, world)
     }
 }
 /** ref counted reference to an [`ItemType`] */
@@ -826,7 +826,7 @@ pub trait ItemTypePolicy: Debug {
         world: &mut World,
     ) -> ActionResponse;
     /** get item data from serde value */
-    fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>>;
+    fn from_json(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>>;
 }
 /** simple enum, each [`ItemKind`] has an [`ItemType`]*/
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
@@ -836,7 +836,7 @@ pub enum ItemKind {
 }
 impl fmt::Display for ItemKind {
     /** display an ItemType for debugging */
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }

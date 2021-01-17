@@ -10,4 +10,8 @@
         android:id="@+id/menuLoadSSH"
         android:orderInCategory="110"
         android:title="Load SSH keys" />
+    <item
+        android:id="@+id/menuDeleteAll"
+        android:orderInCategory="120"
+        android:title="Delete all" />
 </menu>

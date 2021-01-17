@@ -15,11 +15,22 @@ use crate::store::Store;
 use askama::Template;
 use fanling_interface::error_response_result;
 use log::trace;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::fs;
+use std::fs::File;
+
+use std::io::BufReader;
 use std::ops::Deref;
+
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::string::ToString;
+use strum_macros::{Display, EnumString};
 use taipo_git_control::{MergeOutcome, RepoActionRequired};
 
 /** this is the model class that does the actual work */
@@ -72,6 +83,23 @@ impl<'a> World {
         world.ensure_some_items()?;
         trace("created world.");
         Ok(world)
+    }
+    /** `create_base` ensures that the base directory exists and has permissions */
+    pub fn create_base(base_path: &PathBuf) -> Result<(), FanlingError> {
+        if base_path.exists() {
+            trace(&format!(
+                "base dir {:?} already exists, not creating",
+                base_path
+            ));
+            return Ok(());
+        }
+        trace(&format!("creating base dir, base dir is {:?}", &base_path));
+        fs::create_dir_all(base_path.clone())?;
+        trace("ensured directory, setting permissions,,,");
+        let permissions = fs::Permissions::from_mode(0o744);
+        fs::set_permissions(base_path.clone(), permissions)?;
+        trace("permissions set and base dir created");
+        Ok(())
     }
     /** handle any changes to the data that come from the new state of
     the repository after a fetch */
@@ -221,7 +249,7 @@ impl<'a> World {
     fn ensure_some_items(&mut self) -> NullResult {
         let contexts = self.search_contexts()?.entries;
         trace(&format!("contexts are {:?}", &contexts));
-        /* FUTURE seemed to be generating default context even when one already exists. This sems to be fixed now, but check. */
+        /* FUTURE seemed to be generating default context even when one already exists. This seems to be fixed now, but check. */
         if contexts.is_empty() {
             self.ensure_some_context()?;
         }
@@ -348,7 +376,7 @@ impl<'a> World {
     // ) -> ActionResponse {
     //     item.deref().borrow_mut().check_valid(base, vals, self)
     // }
-    /** carry out an action and return a [`Response`]. May delegate the action to a component. */
+    /** carry out an action and return a [`fanling_interface::ResponseResult`]. May delegate the action to a component. */
     pub fn do_action(
         &mut self,
         basic_request: &crate::BasicRequest,
@@ -398,7 +426,7 @@ impl<'a> World {
     /** take the raw data for an item and ensure that the item is ready to use */
     fn get_and_make_known(
         &mut self,
-        serde_value: &serde_yaml::Value,
+        serde_value: &serde_json::Value,
         base: &ItemBaseForSerde,
     ) -> FLResult<ItemRef> {
         fanling_trace!("getting and making known");
@@ -415,12 +443,12 @@ impl<'a> World {
         &mut self,
         item_type: &ItemType,
         base: &ItemBaseForSerde,
-        serde_value: &serde_yaml::Value,
+        serde_value: &serde_json::Value,
     ) -> FLResult<ItemRef> {
         fanling_trace!(&format!("making and populating item {}", &base.ident));
         let mut item = item_type.make_raw();
         trace("setting base...");
-        item.set_from_yaml(serde_value, self)?;
+        item.set_from_json(serde_value, self)?;
         trace("setting data...");
         item.set_from_serde(base)?;
         assert!(
@@ -448,7 +476,7 @@ impl<'a> World {
         res.add_tag("always", &(at.render()?));
         Ok(())
     }
-    /** carry out an action and return a [`Response`]. Does not delegate. */
+    /** carry out an action and return a [`fanling_interface::ResponseResult`]. Does not delegate. */
     pub fn do_world_action(
         &mut self,
         basic_request: &crate::BasicRequest,
@@ -651,27 +679,27 @@ impl<'a> World {
                         "{} item {:?}->{:?}: {:?}",
                         ed.kind, ed.path, ident_from_path, &ed
                     ));
-                    let yaml = if ed.blob.len() < 4 || &ed.blob[0..4] != "---\n" {
+                    let json = if ed.blob.len() < 4 || &ed.blob[0..4] != "---\n" {
                         format!("---\n{}", &ed.blob)
                     } else {
                         ed.blob.to_string()
                     };
-                    //  let trimmed_yaml = yaml.trim_end_matches("\n");
-                    let serde_value_result = serde_yaml::from_str(&yaml);
+                    //  let trimmed_json = json.trim_end_matches("\n");
+                    let serde_value_result = serde_json::from_str(&json);
                     if let Err(e) = &serde_value_result {
                         fanling_trace!(&format!(
-                            "yaml deserialize error: {:?} at {}:{}",
+                            "json deserialize error: {:?} at {}:{}",
                             e,
                             file!(),
                             line!(),
                         ));
                     }
-                    let serde_value: serde_yaml::Value = serde_value_result?;
-                    trace(&format!("yaml value {:#?}", serde_value));
-                    let base_result: Result<ItemBaseForSerde, serde_yaml::Error> =
-                        serde_yaml::from_value(serde_value.clone());
+                    let serde_value: serde_json::Value = serde_value_result?;
+                    trace(&format!("json value {:#?}", serde_value));
+                    let base_result: Result<ItemBaseForSerde, serde_json::Error> =
+                        serde_json::from_value(serde_value.clone());
                     match base_result {
-                        Err(e) => trace(&format!("bad yaml ({:?}): \"{}\"", &e, &yaml)),
+                        Err(e) => trace(&format!("bad json ({:?}): \"{}\"", &e, &json)),
                         Ok(base) => {
                             trace(&format!("adding to search {:?}", base));
                             // let item_ref = self.get_and_make_known(serde_value, &base)?;
@@ -690,7 +718,7 @@ impl<'a> World {
     /** add the item to the search engine */
     fn make_known(
         &mut self,
-        serde_value: &serde_yaml::Value,
+        serde_value: &serde_json::Value,
         base: ItemBaseForSerde,
     ) -> FLResult<Ident> {
         let item_ref = self.get_and_make_known(serde_value, &base)?;
@@ -804,7 +832,7 @@ impl<'a> World {
     pub fn get_item_parts(
         &self,
         ident: &String,
-    ) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
+    ) -> FLResult<(ItemBaseForSerde, serde_json::Value)> {
         let (base, values) = self.store.get_item_parts(ident)?;
         Ok((base, values))
     }
@@ -971,6 +999,88 @@ struct MainTemplate {
 impl Drop for World {
     fn drop(&mut self) {
         trace("dropping world");
+    }
+}
+/** An `WorldStatus` represents the overall status of the World and its data */
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Display,
+    EnumString,
+    Ord,
+    PartialOrd,
+    Hash,
+)]
+pub enum WorldStatus {
+    /// initial status
+    Initial,
+    /// after the data has been built successfully
+    Built,
+    /// status at the start of building the data
+    Bad,
+}
+impl WorldStatus {
+    // /** Create a new WorldStatus */
+    // pub fn new() -> Self {
+    //     Self::Initial
+    // }
+    /** `load` deserialize from file */
+    pub fn load(path: &PathBuf) -> Self {
+        trace(&format!("loading world status from {:?}", path));
+        dump_file_meta(path);
+        if path.is_dir() {
+            trace("is directory! deleting...");
+            std::fs::remove_dir_all(&path).expect("bad delete directory");
+        }
+        match File::open(path) {
+            Err(err) => {
+                trace(&format!(
+                    "cannot read world status file {:?}: {:?}",
+                    &path, err
+                ));
+                Self::Initial
+            }
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                let wsr: serde_json::Result<WorldStatus> = serde_json::from_reader(reader);
+                match wsr {
+                    Err(err) => {
+                        trace(&format!(
+                            "error in deserialising world status file {:?}: {:?}",
+                            &path, err
+                        ));
+                        Self::Initial
+                    }
+                    Ok(ws) => ws,
+                }
+            }
+        }
+    }
+    /** `save` saves the WorldStatus to a file */
+    pub fn save(&self, path: &PathBuf) -> NullResult {
+        trace(&format!("saving world status {} to file {:?}", &self, path));
+        let buffer = File::create(path)?;
+        serde_json::to_writer(buffer, self)?;
+        dump_file_meta(path);
+        Ok(())
+    }
+}
+/** `dump_file_meta` dumps file metadata to the log */
+fn dump_file_meta(path: &PathBuf) {
+    match path.metadata() {
+        Ok(meta) => trace(&format!(
+            "for file path {:?}: permissions {:?} {:o} {}",
+            path,
+            meta.permissions(),
+            meta.mode(),
+            if meta.is_dir() { "is a directory" } else { "" }
+        )),
+        Err(err) => trace(&format!("bad metadata: {:?}", err)),
     }
 }
 /** convenience function for debug traces */

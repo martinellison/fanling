@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-CONFIG=${1:-$BASE/config.yaml}
+CONFIG=${1:-$BASE/config.json}
 PFX=$2
 export BASE=$(git rev-parse --show-toplevel)
 if [[ "$BASE" == "" ]]

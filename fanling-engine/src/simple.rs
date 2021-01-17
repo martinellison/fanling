@@ -11,7 +11,7 @@ use crate::world::{ActionResponse, World};
 use ansi_term::Colour;
 use askama::Template;
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_json::Value;
 use std::boxed::Box;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -35,8 +35,8 @@ impl Simple {
             text: "".to_owned(),
         }
     }
-    fn set_from_yaml_basic(&mut self, yaml: &serde_yaml::Value) -> NullResult {
-        *self = serde_yaml::from_value(yaml.clone())?;
+    fn set_from_json_basic(&mut self, json: &serde_json::Value) -> NullResult {
+        *self = serde_json::from_value(json.clone())?;
         // self.fix_data();
         Ok(())
     }
@@ -80,14 +80,14 @@ impl crate::item::ItemData for Simple {
         trace(&format!("for show {:?}", &resp));
         Ok(resp)
     }
-    fn to_yaml(&self, base: &crate::item::ItemBase) -> Result<Vec<u8>, FanlingError> {
+    fn to_json(&self, base: &crate::item::ItemBase) -> Result<Vec<u8>, FanlingError> {
         let for_serde = SimpleForSerde {
             base: crate::item::ItemBaseForSerde::from_base(base)?,
             data: self.clone(),
         };
-        let yaml = serde_yaml::to_vec(&for_serde)?;
-        trace(&format!("yaml is {}", String::from_utf8_lossy(&yaml)));
-        Ok(yaml)
+        let json = serde_json::to_vec(&for_serde)?;
+        trace(&format!("json is {}", String::from_utf8_lossy(&json)));
+        Ok(json)
     }
     fn is_open(&self) -> bool {
         true
@@ -118,8 +118,8 @@ impl crate::item::ItemData for Simple {
         }
         Ok(())
     }
-    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, _world: &mut World) -> NullResult {
-        *self = serde_yaml::from_value(yaml.clone())?;
+    fn set_from_json(&mut self, json: &serde_json::Value, _world: &mut World) -> NullResult {
+        *self = serde_json::from_value(json.clone())?;
         Ok(())
     }
     /** do action for simple -- should never get called */
@@ -143,7 +143,7 @@ impl crate::item::ItemData for Simple {
     /** transitional to fix old data */
     fn fix_data(
         &self,
-        _yaml: &serde_yaml::Value,
+        _json: &serde_json::Value,
         _base: &mut ItemBase,
         _world: &mut World,
     ) -> NullResult {
@@ -210,9 +210,9 @@ impl crate::item::ItemTypePolicy for SimpleTypePolicy {
         theirs: &Value,
     ) -> FLResult<Box<dyn ItemData>> {
         let mut os = Simple::new();
-        os.set_from_yaml_basic(&ours)?;
+        os.set_from_json_basic(&ours)?;
         let mut ts = Simple::new();
-        ts.set_from_yaml_basic(&theirs)?;
+        ts.set_from_json_basic(&theirs)?;
         os.name = merge_strings(&os.name, &ts.name);
         os.text = merge_strings(&os.text, &ts.text);
         Ok(Box::new(os))
@@ -232,9 +232,9 @@ impl crate::item::ItemTypePolicy for SimpleTypePolicy {
         ar
     }
     /** get item data from serde value */
-    fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
+    fn from_json(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
         let mut s = Simple::default();
-        s.set_from_yaml(&values, world)?;
+        s.set_from_json(&values, world)?;
         Ok(Box::new(s))
     }
 }

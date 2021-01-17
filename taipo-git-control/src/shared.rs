@@ -15,10 +15,12 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 #[derive(Debug)]
-/** data for creating a new [`FanlingRepository`] */
+/** data for creating a new `FanlingRepository` */
 pub struct RepoOptions {
     /** path for repository location */
     pub path: Box<Path>,
+    /** base path for files */
+    pub base_path: Box<Path>,
     /** name for Git commits */
     pub name: String,
     /** email  for Git commits */
@@ -47,6 +49,7 @@ impl Default for RepoOptions {
     fn default() -> Self {
         Self {
             path: PathBuf::from("testfiles/test").into_boxed_path(),
+            base_path: PathBuf::from("testfiles").into_boxed_path(),
             name: "".to_owned(),
             email: "".to_owned(),
             url: None,
@@ -195,6 +198,7 @@ impl Drop for Timer {
     }
 }
 #[macro_export]
+/// used during development for checking elapsed time
 macro_rules! repo_timer {
     ($err:expr) => {
         let _timer = Timer::new($err, concat!(file!(), ":", line!()));
@@ -218,6 +222,7 @@ impl Drop for Tracer {
     }
 }
 #[macro_export]
+/// used during development for tracing execution
 macro_rules! repo_trace {
     ($err:expr) => {
         let _tracer = Tracer::new($err, concat!(file!(), ":", line!()));

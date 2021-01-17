@@ -25,8 +25,16 @@ public class taiposwig {
     return taiposwigJNI.initial_html(SWIGTYPE_p_LowuData.getCPtr(data));
   }
 
+  public static boolean is_ok(SWIGTYPE_p_LowuData data) {
+    return taiposwigJNI.is_ok(SWIGTYPE_p_LowuData.getCPtr(data));
+  }
+
   public static boolean is_shutdown_required(SWIGTYPE_p_LowuData data) {
     return taiposwigJNI.is_shutdown_required(SWIGTYPE_p_LowuData.getCPtr(data));
+  }
+
+  public static String last_string(SWIGTYPE_p_LowuData data) {
+    return taiposwigJNI.last_string(SWIGTYPE_p_LowuData.getCPtr(data));
   }
 
   public static SWIGTYPE_p_LowuData make_data(String fanling_options_json_c) {

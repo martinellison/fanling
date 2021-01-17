@@ -37,9 +37,9 @@ extern crate serde_derive;
 #[cfg(not(target_os = "android"))]
 extern crate web_view;
 //#[macro_use]
-extern crate config;
+use config;
 //extern crate serde_json;
-extern crate structopt;
+
 use ansi_term::Colour::*;
 use ansi_term::Style;
 //use log::trace;
@@ -58,20 +58,21 @@ quick_error! {
 /** An error found in the main program */
     pub enum Fanling10Error {
         /// engine error
-        Engine(err: fanling_engine::FanlingError){from() cause(err) description(err.description())}
+        Engine(err: fanling_engine::FanlingError){from() source(err) display("Engine error: {}", err)}
         /// web error
-        WebView(err: web_view::Error) {from() cause(err) description(err.description())}
+        WebView(err: web_view::Error) {from() source(err) display("WebView error: {}", err)}
         /// repository-related error
-        Repo(err: taipo_git_control::RepoError)  {from() cause(err) description(err.description())}
+        Repo(err: taipo_git_control::RepoError)  {from() source(err) display("Repo error: {}", err)}
         /// generic error
-        Gen(err: std::boxed::Box<dyn std::error::Error>)  {from() description(err.description())}
+        Gen(err: std::boxed::Box<dyn std::error::Error>)  {from() display("Gen error: {}", err)}
         /// system time error
-        Time(err: std::time::SystemTimeError)  {from() cause(err) description(err.description())}
+        Time(err: std::time::SystemTimeError)  {from() source(err) display("Time error: {}", err)}
         /// error with configuration file
-        Config(err: config::ConfigError) {from() cause(err) description(err.description())}
+        Config(err: config::ConfigError) {from() source(err) display("Config error: {}", err)}
     /// error
-    Internal(msg: String) {from()}
-    }}
+    Internal(msg: String) {from()display("internal error: {}", msg) }
+    }
+}
 impl Fanling10Error {
     pub fn new(txt: &str) -> Self {
         Self::Internal(txt.to_string())
@@ -82,23 +83,23 @@ type NullResult = Result<(), Fanling10Error>;
 #[structopt(name = "rprogress", about = "Track progress in learning")]
 /// Options from the command line
 pub struct Opt {
-    ///Database file
-    #[structopt(parse(from_os_str), short = "d", long = "db", default_value = "")]
-    database_path: PathBuf,
-    /// path to the git repository
-    #[structopt(parse(from_os_str), short = "r", long = "repo", default_value = "")]
-    repo: PathBuf,
+    ///path to files
+    #[structopt(parse(from_os_str), short = "p", long = "path", default_value = "")]
+    path: PathBuf,
+    /// name used for files
+    #[structopt(parse(from_str), short = "n", long = "name", default_value = "data")]
+    repo_name: String,
     ///Repository branch
     #[structopt(parse(from_str), short = "b", long = "branch")]
     repo_branch: Option<String>,
     ///Repository remote
     #[structopt(parse(from_str), long = "remote")]
     repo_remote: Option<String>,
-    /// name for git repo
-    #[structopt(parse(from_str), short = "n", long = "name", default_value = "")]
+    /// user name for git repo
+    #[structopt(parse(from_str), short = "u", long = "user", default_value = "")]
     name: String,
     /// URL for git repo
-    #[structopt(parse(from_str), short = "u", long = "url")]
+    #[structopt(parse(from_str), long = "url")]
     url: Option<String>,
     /// email for git repo
     #[structopt(parse(from_str), short = "e", long = "email", default_value = "")]
@@ -110,7 +111,7 @@ pub struct Opt {
     #[structopt(long = "debug")]
     debug: bool,
     /// prefix for identifiers
-    #[structopt(parse(from_str), short = "p", long = "prefix", default_value = "?")]
+    #[structopt(parse(from_str), long = "prefix", default_value = "?")]
     uniq_pfx: String,
     /// configuration file (will override all values)
     #[structopt(parse(from_os_str), short = "c", long = "config", default_value = "")]
@@ -118,7 +119,7 @@ pub struct Opt {
     /// the directory within the repo containing items
     #[structopt(parse(from_str), long = "itemdir", default_value = "items")]
     item_dir: String,
-    /// whether to write to the remote server    
+    /// whether to write to the remote server
     #[structopt(long = "nowrite")]
     no_write_to_server: bool,
     /** automatically generate items for missing items in links */
@@ -130,6 +131,9 @@ pub struct Opt {
     /// whether to slurp ssh files
     #[structopt(long = "slurp-ssh")]
     slurp_ssh: bool,
+    /// whether to ddelete all files
+    #[structopt(long = "delete-all")]
+    delete_all: bool,
 }
 /** used by [web_view::WebView] */
 struct UserData {
@@ -160,7 +164,10 @@ fn actual_main() -> NullResult {
         .to_str()
         .ok_or_else(|| Fanling10Error::new("bad config file name"))?;
     if config_filename != "" {
-        trace(Blue.on(White), "getting config from file");
+        trace(
+            Blue.on(White),
+            &format!("getting config from file {}", &config_filename),
+        );
         let mut config = config::Config::default();
         config.set_default("config", "")?;
         config.set_default("verbose", "false")?;
@@ -170,7 +177,16 @@ fn actual_main() -> NullResult {
         config.set_default("item_dir", "items")?;
         config.set_default("no_write_to_server", "false")?;
         config.set_default("autolink", "false")?;
-        config.merge(config::File::with_name(config_filename))?;
+        config.set_default("delete_all", "false")?;
+        trace(Blue.on(White), &format!("default config is {:?}", &config));
+        trace(Blue.on(White), "getting config file");
+        let file_config = config::File::with_name(config_filename);
+        trace(
+            Blue.on(White),
+            &format!("merging config from file {:?}", &file_config),
+        );
+        config.merge(file_config)?;
+        trace(Blue.on(White), "config merged");
         opt = config.try_into()?;
     }
     let verbose = opt.verbose;
@@ -181,7 +197,14 @@ fn actual_main() -> NullResult {
     let options = fanling_engine::EngineOptions {
         correct: true,
         repo_options: taipo_git_control::RepoOptions {
-            path: opt.repo.clone().into_boxed_path(),
+            path: [
+                opt.path.clone(),
+                PathBuf::from(opt.repo_name.clone() + ".git"),
+            ]
+            .iter()
+            .collect::<PathBuf>()
+            .into_boxed_path(),
+            base_path: opt.path.clone().into_boxed_path(),
             name: opt.name.clone(),
             email: opt.email.clone(),
             url: opt.url.clone(),
@@ -194,10 +217,24 @@ fn actual_main() -> NullResult {
         },
         interface_type: fanling_engine::InterfaceType::PC,
         search_options: fanling_engine::SearchOptions {
-            database_path: opt.database_path.to_string_lossy().to_string(),
+            database_path: [
+                opt.path.clone(),
+                PathBuf::from(opt.repo_name.clone() + ".db"),
+            ]
+            .iter()
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .to_string(),
         },
         uniq_pfx: opt.uniq_pfx.clone(),
         auto_link: opt.auto_link,
+        status_path: [
+            PathBuf::from(opt.path.clone()),
+            PathBuf::from(opt.repo_name.clone() + "-status"),
+        ]
+        .iter()
+        .collect::<PathBuf>(),
+        root_path: PathBuf::from(opt.path.clone()),
     };
     //  let mut engine = fanling_engine::FanlingEngine::new(&options)?;
     trace(
@@ -221,9 +258,15 @@ fn run_engine_with_webview(
 ) -> NullResult {
     trace(Blue.on(White), "building webview...");
     let verbose = opt.verbose;
-    let p = UserData {
+    let mut p = UserData {
         engine: fanling_engine::FanlingEngine::new(&options)?,
     };
+    if opt.delete_all {
+        trace(Black.on(White), "deleting everything");
+        let destroy_everything_body = "{\"a\":\"DeleteEverything\",\"i\":\"\",\"t\":\"\"}"; // action for engine
+        p.engine.execute(destroy_everything_body)?;
+        return Ok(());
+    }
     {
         let now = SystemTime::now();
         let webview = web_view::builder()
@@ -262,7 +305,7 @@ fn run_engine_with_webview(
     trace(Blue.on(White), "run, ending main.");
     Ok(())
 }
-fn invoke_handler(webview: &mut WebView<UserData>, arg: &str) -> WVResult {
+fn invoke_handler(webview: &mut WebView<'_, UserData>, arg: &str) -> WVResult {
     trace(
         Black.on(White),
         &format!(
@@ -277,7 +320,7 @@ fn invoke_handler(webview: &mut WebView<UserData>, arg: &str) -> WVResult {
     Ok(())
 }
 fn handle_response(
-    webview: &mut WebView<UserData>,
+    webview: &mut WebView<'_, UserData>,
     response: &fanling_interface::TPResult<fanling_interface::Response>,
     arg: &str,
 ) {

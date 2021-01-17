@@ -14,7 +14,7 @@ Fanling is a distributed note-taking system that is currently implemented on:
 * Linux PC
 * Android
 
-It should alse be possible to build Fanling on Microsoft Windows and
+It should also be possible to build Fanling on Microsoft Windows and
 Apple PC platforms. It should also be possible to write an iPhone port
 of the Android version.
 
@@ -29,14 +29,14 @@ which is used by the platform-specific implementations.
 
 The engine contains the following modules:
 
-* [`item`] -- implements a single item (page, node)
-* [`markdown`] -- supports markdown formatting
-* [`search`] -- searches for items (uses sqlite)
-* [`shared`] -- some shared code used in multiple modules
-* [`simple`] -- implements the 'simple' item type (in effect, a wiki page)
-* [`store`] -- stores items (using Git)
-* [`task`] --  implements the 'task' item type (a to-do item)
-* [`world`] -- the collection of all items
+* `item` -- implements a single item (page, node)
+* `markdown` -- supports markdown formatting
+* `search` -- searches for items (uses sqlite)
+* `shared` -- some shared code used in multiple modules
+* `simple` -- implements the 'simple' item type (in effect, a wiki page)
+* `store` -- stores items (using Git)
+* `task` --  implements the 'task' item type (a to-do item)
+* `world` -- the collection of all items
 
 */
 #[warn(missing_docs, unreachable_pub, unused_extern_crates, unused_results)]
@@ -47,12 +47,13 @@ extern crate diesel;
 extern crate diesel_migrations;
 #[macro_use]
 extern crate quick_error;
-extern crate askama;
-extern crate dotenv;
-extern crate fanling_interface;
-extern crate regex;
-extern crate rust_embed;
-pub extern crate taipo_git_control;
+use crate::world::WorldStatus;
+use askama;
+
+use fanling_interface;
+
+pub use taipo_git_control;
+
 //use std::panic::catch_unwind;
 mod item;
 mod markdown;
@@ -69,8 +70,10 @@ use log::trace;
 pub use search::SearchOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
 use std::panic;
 use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 // #[macro_use]
@@ -81,6 +84,7 @@ use std::time::SystemTime;
 pub enum Action {
     Start,
     Shutdown,
+    DeleteEverything,
     // SetOptions(Options),
     Pull,
     PushAndQuit { force: bool },
@@ -112,9 +116,10 @@ pub enum Action {
 impl Action {
     fn kind(&self) -> ActionKind {
         match self {
-            Action::Shutdown | Action::PushAndQuit { force: _ } | Action::TestError1 => {
-                ActionKind::Engine
-            }
+            Action::Shutdown
+            | Action::PushAndQuit { force: _ }
+            | Action::DeleteEverything
+            | Action::TestError1 => ActionKind::Engine,
             Action::Start
             | Action::Pull
             | Action::Create(_, _)
@@ -137,7 +142,7 @@ impl Action {
             | Action::Reopen
             | Action::BlockBy(_)
             | Action::UnblockBy(_) => ActionKind::Item,
-            Action::Unknown => panic!("unknown action"),
+            Action::Unknown => panic!("unknown action".to_string()),
         }
     }
 }
@@ -195,7 +200,7 @@ impl BasicRequest {
 // impl Default for BasicRequest {
 //     fn default() -> Self {}
 // }
-/** options for an [Engine]. Some fields are passed down to components. */
+/** options for an `Engine`. Some fields are passed down to components. */
 #[derive(Debug)]
 pub struct EngineOptions {
     /** options have been specified */
@@ -210,6 +215,10 @@ pub struct EngineOptions {
     pub uniq_pfx: String,
     /** automatically generate items for missing items in links */
     pub auto_link: bool,
+    /** file for checking overall status */
+    pub status_path: PathBuf,
+    /** path containing all data */
+    pub root_path: PathBuf,
 }
 /** type of user interface that drives this engine. Can be used to elicit different behaviour depending on the interface type. */
 #[derive(Copy, Clone, Debug)]
@@ -222,25 +231,42 @@ pub enum InterfaceType {
 pub struct FanlingEngine {
     /** the model */
     world: Option<world::World>,
-    // interface_callback: Option<fn(js: &str)>,
+    /** path containing all data */
+    root_path: PathBuf,
+    //   /** path containing status */
+    //  status_path: PathBuf,
 }
 impl FanlingEngine {
     /** create a new [FanlingEngine], which implements [fanling_interface::Engine]  */
 
     pub fn new(opts: &EngineOptions) -> Result<Self, FanlingError> {
         fanling_trace!(&format!(
-            "making engine for {:?}",
-            // env::var("TARGET").unwrap_or("no target".to_string()),
-            // env::var("HOST").unwrap_or("no host".to_string()),
-            opts.interface_type
+            "making engine for {:?}, options correct {:?}",
+            &opts.interface_type, &opts.correct
         ));
+        let status = WorldStatus::load(&opts.status_path);
+        trace(&format!("world status is {}", status));
         Ok(Self {
-            world: if opts.correct {
-                Some(world::World::new_and_open(opts)?)
+            root_path: opts.root_path.clone(),
+            // status_path: opts.status_path.clone(),
+            world: if opts.correct && status != WorldStatus::Bad {
+                trace(&format!("making world, base is {:?}", &opts.root_path));
+                world::World::create_base(&opts.root_path)?;
+                WorldStatus::Bad.save(&opts.status_path)?;
+                trace("base created");
+                let world = world::World::new_and_open(opts)?;
+                trace("world exists");
+                WorldStatus::Built.save(&opts.status_path)?;
+                Some(world)
             } else {
                 None
             },
         })
+    }
+    /** `delete_everything` deletes all the data on disk used by the engine. */
+    pub fn delete_everything(&self) -> fanling_interface::ResponseResult {
+        std::fs::remove_dir_all(&self.root_path)?;
+        fanling_interface::default_response_result()
     }
     fn do_engine_action(
         &mut self,
@@ -250,6 +276,7 @@ impl FanlingEngine {
         match basic_request.action {
             Action::Shutdown => self.shutdown(),
             Action::PushAndQuit { force } => self.push_and_shutdown(force),
+            Action::DeleteEverything => self.delete_everything(),
             Action::TestError1 => {
                 if let Some(world) = &self.world {
                     trace("making world test error 1");
@@ -333,7 +360,7 @@ impl fanling_interface::Engine for FanlingEngine {
             Ok(res) => res,
             Err(e) => {
                 let es = format!("execute error {:?}", e);
-                trace(&format!("ee/{}", es));
+                trace(&format!("ee/{}", es)); // does not provide useful info, just "Any"
                 Err(Box::new(fanling_error!("error in execute")))
             }
         }

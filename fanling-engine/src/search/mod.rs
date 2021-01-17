@@ -194,7 +194,7 @@ impl Drop for Search {
     }
 }
 
-/** options for a [Search]. */
+/** options for a `Search`. */
 #[derive(Debug)]
 pub struct SearchOptions {
     pub database_path: String,

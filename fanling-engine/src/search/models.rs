@@ -14,7 +14,7 @@ use std::convert::TryInto;
 // Item table
 
 #[derive(Queryable)]
-/** an [Item]  in the database */
+/** an `Item`  in the database */
 pub struct DslItem {
     ident: String,
     _type_name: String,
@@ -38,7 +38,7 @@ impl Into<ItemListEntry> for DslItem {
 
 #[derive(Insertable)]
 #[table_name = "item"]
-/** a new [Item] in the database for inserts */
+/** a new `Item` in the database for inserts */
 pub struct NewItem<'a> {
     pub ident: &'a str,
     pub type_name: &'a str,
@@ -52,7 +52,7 @@ pub struct NewItem<'a> {
 }
 
 /** create a new item in the database */
-pub fn create_item<'a>(conn: &SqliteConnection, new_item: &NewItem) -> NullResult {
+pub fn create_item<'a>(conn: &SqliteConnection, new_item: &NewItem<'_>) -> NullResult {
     Ok(diesel::insert_into(item::table)
         .values(new_item)
         .execute(conn)
@@ -170,7 +170,7 @@ pub mod global_row {
     // Global table
 
     #[derive(Queryable)]
-    /** the [Global]  in the database. This table only has one row. */
+    /** the `Global`  in the database. This table only has one row. */
     pub struct DslGlobal {
         _id: i32,
         ident_prefix: String,

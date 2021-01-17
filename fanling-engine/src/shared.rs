@@ -46,10 +46,17 @@ macro_rules! dump_fanling_error {
             Err(e) => {
                 let re = FanlingError::from(e);
                 re.dump(file!(), line!(), column!());
+                let descr = format!(
+                    "fanling error at {}:{}:{}: {:?} ",
+                    file!(),
+                    line!(),
+                    column!(),
+                    &re
+                );
                 if !cfg!(android) {
-                    panic!("fanling error");
+                    panic!(descr);
                 }
-                return Err(fanling_error!("bad"));
+                return Err(fanling_error!(descr));
             }
         }
     };
@@ -69,7 +76,7 @@ pub enum FanlingError {
     Diesel(err: diesel::result::Error) {from() cause(err)    description(err.description())}
     Template(err: crate::askama::Error)  {from() cause(err)  description(err.description())}
     Time(err: std::time::SystemTimeError)  {from() cause(err)   description(err.description())}
-    Yaml (err: serde_yaml::Error) {from() cause(err)    description(err.description())}
+    // Json (err: serde_json::Error) {from() cause(err)    description(err.description())}
     DieselMigration(err:  diesel_migrations::RunMigrationsError) {from() cause(err) description(err.description())}
     Gen(err: std::boxed::Box<dyn std::error::Error>)  {from()description(err.description())}
     DieselConnection(err: diesel::ConnectionError) {from() cause(err) description(err.description())}

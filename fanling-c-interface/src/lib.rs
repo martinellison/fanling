@@ -5,15 +5,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 /*!
 
 `fanling-c-interface` provides a C-friendly interface for the Fanling
-functionality exposed by the [`fanling_interface`] crate.
+functionality exposed by the `fanling_interface` crate.
 
 The `fanling-c-interface` interface is wrapped using the SWIG interface
 generator to provide a Java interface, which is imported by the `Lowu`
 Android application. Together, these provide an Android port of the
 Fanling application.
 
-This crate wraps [`fanling_interface`] in the C-compatable subset of
-rust, which is converted by [`cbindgen`] into C.
+This crate wraps `fanling_interface` in the C-compatible subset of
+rust, which is converted by `cbindgen` into C.
 
 The life cycle of the interface is, in general:
 
@@ -26,11 +26,11 @@ that needs to be followed by the main program
 */
 //#![cfg(target_os = "android")]
 #![allow(non_snake_case)]
-extern crate libc;
+
 // use std::cell::RefCell;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::ops::Deref;
+
 use std::os::raw::c_char;
 use std::path::PathBuf;
 //use taipo_git_control::RepoOptions;
@@ -46,18 +46,32 @@ use serde::Deserialize;
 use std::panic;
 use std::panic::AssertUnwindSafe;
 
-#[no_mangle]
+//#[no_mangle]
 /// the main data, including the [`FanlingEngine`] data for the engine
 
 pub struct LowuData {
+    is_ok: bool,
     engine: Option<FanlingEngine>,
     last_response: fanling_interface::ResponseResult,
     last_key: CString,
     last_string: CString,
     //  canary: String, // for debug
 }
-
 #[no_mangle]
+/// return whether it was ok
+pub unsafe extern "C" fn is_ok(data: *mut LowuData) -> bool {
+    let d = data.as_mut().expect("bad pointer");
+    d.is_ok
+}
+#[no_mangle]
+/// get the most recent string
+pub unsafe extern "C" fn last_string(data: *mut LowuData) -> *const c_char {
+    debug!("getting inital html...");
+    let d = data.as_mut().expect("bad pointer");
+    d.last_string.as_ptr()
+}
+
+//#[no_mangle]
 #[repr(u8)]
 /// application cycle events to be sent to the engine
 pub enum CCycleEvent {
@@ -97,8 +111,8 @@ impl CCycleEvent {
 #[derive(Deserialize)]
 struct FanlingOptions {
     pub correct: bool,
-    pub database_path: String,
-    pub git_path: String,
+    pub path: String,
+    pub repo_name: String,
     pub name: String,
     pub email: String,
     pub url: String,
@@ -112,11 +126,17 @@ struct FanlingOptions {
 #[no_mangle]
 /// creates the main data structure. If you call this, you should call `delete_data` at the end of the program. Note that we initialise the android log; we can only do this once but this code is called more than once, and we have no easy way to check whether it has been called already, so we just ignore any error.
 pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mut LowuData {
+    let mut is_ok = true;
     //  println!("making data...");
     #[cfg(target_os = "android")]
     match android_log::init("taipo") {
-        Err(e) => debug!("on initialising android logger, got error: {:?}", e),
-        _ => {}
+        Err(e) => {
+            is_ok = false;
+            debug!("on initialising android logger, got error: {:?}", e)
+        }
+        _ => {
+            trace!("android logging started");
+        }
     }
     debug!("making engine options in rust...");
     let fanling_options_json = string_from_c(fanling_options_json_c);
@@ -124,14 +144,22 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
     let fanling_options: FanlingOptions = serde_json::from_str(&fanling_options_json)
         .or_else(|err| {
             debug!("bad deserialise: {:?}", err);
+            is_ok = false;
             Err(err)
         })
         .expect("bad deserialise");
-    debug!("...creating engine options...");
+    trace!("...creating engine options...");
     let engine_options = EngineOptions {
         correct: fanling_options.correct,
         repo_options: taipo_git_control::RepoOptions {
-            path: PathBuf::from(fanling_options.git_path).into_boxed_path(),
+            path: [
+                PathBuf::from(fanling_options.path.clone()),
+                PathBuf::from(fanling_options.repo_name.clone() + ".git"),
+            ]
+            .iter()
+            .collect::<PathBuf>()
+            .into_boxed_path(),
+            base_path: PathBuf::from(fanling_options.path.clone()).into_boxed_path(),
             name: fanling_options.name,
             email: fanling_options.email,
             url: if fanling_options.have_url {
@@ -146,38 +174,72 @@ pub unsafe extern "C" fn make_data(fanling_options_json_c: *const c_char) -> *mu
         },
         interface_type: InterfaceType::Android,
         search_options: fanling_engine::SearchOptions {
-            database_path: fanling_options.database_path,
+            database_path: [
+                PathBuf::from(fanling_options.path.clone()),
+                PathBuf::from(fanling_options.repo_name.clone() + ".db"),
+            ]
+            .iter()
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .to_string(),
         },
         uniq_pfx: fanling_options.unique_prefix,
         auto_link: fanling_options.auto_link,
+        status_path: [
+            PathBuf::from(fanling_options.path.clone()),
+            PathBuf::from(fanling_options.repo_name.clone() + "-status"),
+        ]
+        .iter()
+        .collect::<PathBuf>(),
+        root_path: PathBuf::from(fanling_options.path.clone()),
     };
     debug!("options as read {:#?}", engine_options);
     debug!("making data in rust...");
     let mut msg = "Starting engine...".to_owned();
     let mut engine: Option<FanlingEngine> = None;
+    debug!("about to create engine");
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        debug!("creating engine...");
         match FanlingEngine::new(&engine_options) {
             Err(e) => {
-                error!("could not create engine - {:?}", e);
-                msg = format!("Error: {:?}", e);
+                error!("could not create engine: {:?}", &e);
+                is_ok = false;
+                msg = format!("Engine creation error: {:?}", &e);
             }
-            Ok(e) => engine = Some(e),
+            Ok(e) => {
+                engine = Some(e);
+                debug!("engine ok");
+                msg = "Engine created".to_string();
+            }
         };
     }));
+    debug!("engine creation attempted {:?}", result);
     match result {
         Ok(_) => (),
         Err(e) => {
-            trace!("making engine failed {:?}", e);
-            msg = match e.downcast_ref::<Box<String>>() {
-                Some(x) => format!("mee/{:?}", x),
-                None => format!("bad error {:?}", e.deref().type_id()),
+            trace!(
+                "making engine failed {:?} which is a {:?}",
+                e.as_ref(),
+                e.type_id()
+            );
+            is_ok = false;
+            msg = if let Some(x) = e.downcast_ref::<Box<String>>() {
+                format!("engine creation error (boxed): {:?}", x)
+            } else if let Some(x) = e.downcast_ref::<String>() {
+                format!("engine creation error: {:?}", x)
+            } else {
+                "(not a known type)".to_string()
             };
-            trace!("msg is {}", msg);
-            // format!("making engine error {:?}", msg);
+            trace!("error: {}", msg);
         }
     }
-    debug!("got engine, making top level rust data...");
+    debug!(
+        "got engine ({}: {}), making top level rust data...",
+        if is_ok { "OK" } else { "not OK" },
+        msg
+    );
     let data = Box::into_raw(Box::new(LowuData {
+        is_ok,
         engine,
         last_string: string_to_cstring(msg),
         last_key: string_to_cstring("".to_string()),
@@ -348,7 +410,7 @@ pub extern "C" fn is_shutdown_required(data: *mut LowuData) -> bool {
         Err(_e) => false,
     }
 }
-#[no_mangle]
+//#[no_mangle]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 /// an item of a response

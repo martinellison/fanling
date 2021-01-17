@@ -19,7 +19,9 @@ public class taiposwigJNI {
   public final static native void execute(long jarg1, String jarg2);
   public final static native void handle_event(long jarg1, int jarg2);
   public final static native String initial_html(long jarg1);
+  public final static native boolean is_ok(long jarg1);
   public final static native boolean is_shutdown_required(long jarg1);
+  public final static native String last_string(long jarg1);
   public final static native long make_data(String jarg1);
   public final static native String response_error(long jarg1);
   public final static native long response_item(long jarg1, int jarg2);

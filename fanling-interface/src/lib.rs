@@ -10,11 +10,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 The main export of this crate is the `Engine` trait. (The
 implementation of the `Engine` trait is
-[`fanling_engine::FanlingEngine`]).
+`crate::fanling_engine::FanlingEngine`).
 
 Currently, this interface is used by:
 
-* a PC implementation [`fanling10::Fanling10`]
+* a PC implementation `fanling10::Fanling10`
 * an Android implementation using the `fanling_c*interface` crate and the
 `Lowu` Android app.
 */

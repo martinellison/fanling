@@ -4,9 +4,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /*! tests for git repository support */
 
-use crate::rand::Rng;
 use crate::repo::FanlingRepository;
 use crate::RepoOptions;
+use rand::Rng;
 
 use std::path::PathBuf;
 
@@ -18,6 +18,7 @@ fn it_works() {
 fn blob() -> super::NullResult {
     let opts = RepoOptions {
         path: temp_repo_path().into_boxed_path(),
+        base_path: temp_repo_path().into_boxed_path(),
         name: "tester".to_string(),
         email: "m,e@acm.org".to_string(),
         url: None,
@@ -43,6 +44,7 @@ fn blob() -> super::NullResult {
 fn init() -> super::NullResult {
     let opts = RepoOptions {
         path: temp_repo_path().into_boxed_path(),
+        base_path: temp_repo_path().into_boxed_path(),
         name: "tester".to_string(),
         email: "m,e@acm.org".to_string(),
         url: None,
@@ -61,6 +63,7 @@ fn init() -> super::NullResult {
 fn open() -> super::NullResult {
     let opts = RepoOptions {
         path: temp_repo_path().into_boxed_path(),
+        base_path: temp_repo_path().into_boxed_path(),
         name: "tester".to_string(),
         email: "m,e@acm.org".to_string(),
         url: None,
@@ -158,10 +161,11 @@ fn open() -> super::NullResult {
 
 #[test]
 fn clone() -> super::NullResult {
-    let _path = temp_repo_path();
+    let path = temp_repo_path();
     const URL_STRING: &str = &"git@work.jennyemily.hk:fanling/testrep.git";
     let opts = RepoOptions {
-        path: temp_repo_path().into_boxed_path(),
+        path: path.clone().into_boxed_path(),
+        base_path: path.clone().into_boxed_path(),
         name: "tester".to_string(),
         email: "m,e@acm.org".to_string(),
         url: Some(URL_STRING.to_owned()),

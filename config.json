@@ -1,0 +1,1 @@
+{"auto_link":true,"database_path":"testfiles/testdb.db","debug":false,"email":"m.e@acm.org","item_dir":"itemsj","name":"martin","repo":"testfiles/test.git","repo_branch":"test","slurp_ssh":false,"ssh_path":".ssh/id_rsa","uniq_pfx":"b","verbose":true}

@@ -21,3 +21,5 @@ testfiles
 testfiles/testrep2.git/
 tools
 Lowu/app/src/main/java/taiposwig
+Lowu/local.properties
+cmd/**

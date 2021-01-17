@@ -9,12 +9,12 @@ and keys are paths (also byte slices). Blobs are represented by
 [`RepoOid`]s. Blobs are notified using
 [`FanlingRepository::notify_blob`], which returns a `RepoOid`. A copy
 of the original Blob can be retrieved using
-[`FanlingRepository::get_blob`].
+`FanlingRepository::get_blob`.
 
 As `Taipo git control` is based on git, [`FanlingRepository::fetch`]
 can result in a merge conflict. It is the user's responsibility to
 resolve this before any further use of the system, by applying the
-necesary changes.
+necessary changes.
 
 * FUTURE example tests; cover all main cases including merge conflicts
 
@@ -23,7 +23,6 @@ Some code copied from [here](https://zsiciarz.github.io/24daysofrust/book/vol2/d
 FUTURE: test named branch works
  */
 
-extern crate rand;
 #[macro_use]
 extern crate quick_error;
 

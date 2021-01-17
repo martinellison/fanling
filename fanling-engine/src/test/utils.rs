@@ -65,6 +65,8 @@ pub(crate) fn simple_options(test_dir: &str, database_path: &str) -> super::Engi
         },
         uniq_pfx: "a".to_string(),
         auto_link: false,
+        status_path: PathBuf::from(""),
+        root_path: PathBuf::from(""),
     }
 }
 pub(crate) fn init_files(dir: &str, subdir: &str) -> (String, String) {
@@ -110,6 +112,8 @@ pub(crate) fn test_engine(
         },
         uniq_pfx: uniq_pfx.to_string(),
         auto_link: false,
+        status_path: PathBuf::from(""),
+        root_path: PathBuf::from(""),
     };
 
     let engine = super::FanlingEngine::new(&options)?;

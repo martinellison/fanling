@@ -21,6 +21,9 @@ use std::str;
 //use std::time::Duration;
 use std::fs;
 use std::thread;
+
+//use std::os::unix::fs::PermissionsExt;
+
 use std::time::SystemTime;
 
 /** whether any further action is required on a newly-opened repo */
@@ -60,9 +63,10 @@ impl FanlingRepository {
     /*  Creating repository */
     /** ensure that the repo is open (creating it or cloning it if necessary) */
     pub fn new_open(opts: &RepoOptions) -> RepoResult<(FanlingRepository, RepoActionRequired)> {
-        repo_trace!("new open");
+        repo_trace!("repo new open");
         trace(&format!("options {:?}", opts));
         let (mut repo, repo_action_required) = Self::new_from_options(opts)?;
+        trace("repo ok, checking structure");
         let struct_status = repo.check_structure()?;
         if struct_status == StructureStatus::BadHead {
             repo.create_initial()?;
@@ -77,8 +81,8 @@ impl FanlingRepository {
     /** create a repository object (creating it or cloning it if necessary) */
     fn new_from_options(opts: &RepoOptions) -> RepoResult<(FanlingRepository, RepoActionRequired)> {
         repo_trace!("new from options");
-        if opts.path.exists() {
-            trace("need to open existing repo");
+        if Self::can_open_repo(&opts.path)? {
+            trace(&format!("need to open existing repo {:?}", opts.path));
             Ok((Self::open(opts)?, RepoActionRequired::ProcessChanges))
         } else if opts.url.is_none() {
             trace("no repo, no remote, need to init repo");
@@ -96,10 +100,67 @@ impl FanlingRepository {
         let r = dump_error!(Repository::init_bare(path));
         Ok(Self::new(r, opts)?)
     }
+    /** `can_open_repo` checks whether there is a repository that can be opened */
+    fn can_open_repo(repo_path: &Path) -> RepoResult<bool> {
+        if !repo_path.exists() {
+            trace("repo does not exist");
+            return Ok(false);
+        }
+        if !repo_path.is_dir() {
+            trace("repo is not dir");
+            return Ok(false);
+        }
+        let mut has_entry = false;
+        for entry in repo_path.read_dir()? {
+            if let Err(_e) = entry {
+                trace("has bad entry");
+                return Ok(false);
+            } else {
+                has_entry = true;
+            }
+        }
+        if !has_entry {
+            trace("repo has no files");
+            return Ok(false);
+        }
+        Ok(true)
+    }
     /** open an existing repository */
     fn open(opts: &RepoOptions) -> RepoResult<FanlingRepository> {
         repo_timer!("open repo");
+        trace(&format!("opening repo: {:?}", &opts.path));
+        if opts.path.exists() {
+            if opts.path.is_dir() {
+                trace("directory found, listing:");
+                for entry in opts.path.read_dir()? {
+                    match entry {
+                        Ok(_ent) => {
+                            //  trace(&format!("dir has {:?}", ent.path()));
+                        }
+                        Err(e) => {
+                            trace(&format!("bad entry {:?}", e));
+                        }
+                    }
+                }
+            } else {
+                trace(&format!("{:?} is not a directory", &opts.path));
+            }
+        } else {
+            // trace(&format!("path to repo : {:?}", &opts.path));
+            for ap in opts.path.ancestors() {
+                trace(&format!(
+                    "{:?} {}",
+                    ap,
+                    if ap.exists() {
+                        "exists"
+                    } else {
+                        "does not exist"
+                    }
+                ));
+            }
+        }
         let r = dump_error!(Repository::open(opts.path.clone()));
+        trace("repo opened");
         Ok(Self::new(r, opts)?)
     }
     /** clone a repository from a server (a Git clone, not a Rust clone) */
@@ -107,6 +168,7 @@ impl FanlingRepository {
         repo_timer!("clone repo");
         let mut fetch_options = FetchOptions::new();
         let mut cb = git2::RemoteCallbacks::new();
+        let path = opts.path.clone();
         Self::set_remote_callbacks(
             &opts
                 .ssh_path
@@ -124,12 +186,21 @@ impl FanlingRepository {
             .url
             .clone()
             .ok_or_else(|| repo_error!("URL must be specified for clone"))?;
-        fs::create_dir_all(opts.path.clone())?;
+        trace(&format!("dir for clone is {:?}", &path));
+        // fs::create_dir_all(opts.base_path.clone())?;
+        // // TODO: revisit and probably remove permission hacking
+        // // get a ?permissions error in Android, maybe file does not exist or wrong file path
+        // trace("ensured directory, setting permissions,,,");
+        // Self::dump_file_meta(&opts.base_path.as_ref())?;
+        // let permissions = Permissions::from_mode(0o744);
+        // fs::set_permissions(opts.base_path.clone(), permissions)?;
+        // trace("permissions set");
+        // Self::dump_file_meta(&opts.base_path.as_ref())?;
         trace(&format!(
             "actually cloning (url {:?}) to {:?}...",
-            url, &opts.path
+            &url, &path
         ));
-        let r = dump_error!(builder.clone(&url, &opts.path.clone()));
+        let r = dump_error!(builder.clone(&url, &path));
         trace("cloned.");
         Ok(Self::new(r, opts)?)
     }
@@ -192,7 +263,7 @@ impl FanlingRepository {
     //     }
     // }
     /** get last commit for branch */
-    fn find_last_commit(&self) -> Result<Option<Commit>, RepoError> {
+    fn find_last_commit(&self) -> Result<Option<Commit<'_>>, RepoError> {
         let head = dump_error!(self.repo.head());
         let obj = dump_error!(head.resolve()?.peel(ObjectType::Commit));
         trace(&format!("last commit at {}", obj.id()));
@@ -253,9 +324,9 @@ impl FanlingRepository {
     /** commit changes */
     fn write_commit(
         &self,
-        new_tree: Tree,
+        new_tree: Tree<'_>,
         message: &str,
-        parent_commits: &[&Commit],
+        parent_commits: &[&Commit<'_>],
     ) -> RepoResult<Oid> {
         repo_trace!("writing commit");
         trace(&format!(
@@ -284,13 +355,13 @@ impl FanlingRepository {
         Ok(commit_oid)
     }
     /** latest local commit for fetch */
-    pub fn our_commit(&self) -> RepoResult<Commit> {
+    pub fn our_commit(&self) -> RepoResult<Commit<'_>> {
         Ok(self
             .find_last_commit()?
             .ok_or_else(|| (repo_error!("no commit")))?)
     }
     /** latest commit on other branch after fetch */
-    pub fn their_commit(&self) -> RepoResult<Commit> {
+    pub fn their_commit(&self) -> RepoResult<Commit<'_>> {
         let their_reference = self.repo.find_reference("FETCH_HEAD")?;
         Ok(their_reference.peel_to_commit()?)
     }
@@ -301,21 +372,32 @@ impl FanlingRepository {
     assumes head */
     fn check_structure(&self) -> RepoResult<StructureStatus> {
         repo_trace!("check structure");
+        // error in Android is somewhere after here but before any other trace statements
         let head = match self.repo.head() {
-            Ok(h) => h,
+            Ok(h) => {
+                repo_trace!("found head");
+                h
+            }
             Err(e) => {
                 trace(&format!("error from head: {:?}", e));
+                repo_trace!("structure is: bad head");
                 return Ok(StructureStatus::BadHead);
             }
         };
+        repo_trace!("have head");
         if !head.is_branch() {
+            repo_trace!("structure is: head not branch");
             return Ok(StructureStatus::HeadNotBranch);
         }
         let tree = dump_error!(head.peel_to_tree());
+        repo_trace!("have tree");
         let sub_tree = self.try_get_subtree(tree)?;
+        repo_trace!("have subtree");
         if sub_tree.is_none() {
+            repo_trace!("structure is: no subtree");
             return Ok(StructureStatus::NoSubTree);
         }
+        repo_trace!("structure is good");
         Ok(StructureStatus::Good)
     }
     /** create structure */
@@ -379,7 +461,7 @@ impl FanlingRepository {
         tree_oid: Option<Oid>,
         readme_text: &str,
         test_mark: &str, /* for debugging */
-    ) -> RepoResult<TreeBuilder> {
+    ) -> RepoResult<TreeBuilder<'_>> {
         repo_trace!("building treebuilder with readme");
         let mut new_tree_builder = match tree_oid {
             None => {
@@ -403,7 +485,7 @@ impl FanlingRepository {
 
     set the entry for the item subdirectory in the parent tree builder */
     fn insert_directory(
-        parent_tree_builder: &mut TreeBuilder,
+        parent_tree_builder: &mut TreeBuilder<'_>,
         sub_dir_name: &str,
         subtree_oid: Oid,
     ) -> NullResult {
@@ -420,7 +502,7 @@ impl FanlingRepository {
     /** insert blob (file) into tree */
     fn insert_file(
         &self,
-        parent_tree_builder: &mut TreeBuilder,
+        parent_tree_builder: &mut TreeBuilder<'_>,
         text: &str,
         path: &str,
     ) -> NullResult {
@@ -431,7 +513,7 @@ impl FanlingRepository {
     /** insert blob (file) into tree */
     fn insert_blob(
         &self,
-        parent_tree_builder: &mut TreeBuilder,
+        parent_tree_builder: &mut TreeBuilder<'_>,
         oid: Oid,
         path: &str,
     ) -> NullResult {
@@ -441,7 +523,7 @@ impl FanlingRepository {
         Ok(())
     }
     /** check/get directory entry from tree */
-    fn try_get_subtree(&self, parent_tree: Tree) -> RepoResult<Option<Tree>> {
+    fn try_get_subtree(&self, parent_tree: Tree<'_>) -> RepoResult<Option<Tree<'_>>> {
         //  trace(&format!("parent tree has {} entries", parent_tree.len()));
         Self::describe_tree(&parent_tree, "try_get_subtree:parent");
         match parent_tree.get_name(&self.item_dir) {
@@ -469,14 +551,14 @@ impl FanlingRepository {
     }
 
     /** check if tree contains file by path */
-    fn has_file(&self, tree: Tree, path: &str) -> bool {
+    fn has_file(&self, tree: Tree<'_>, path: &str) -> bool {
         match tree.get_name(path) {
             None => false,
             Some(n) => n.kind() == Some(ObjectType::Blob),
         }
     }
     /** get the latest top-level tree in the repo (on the required branch) */
-    fn get_latest_tree(&self) -> Result<Tree, RepoError> {
+    fn get_latest_tree(&self) -> Result<Tree<'_>, RepoError> {
         repo_trace!("get latest tree");
         let reference = dump_error!(self.repo.head());
         let tree = dump_error!(reference.peel_to_tree());
@@ -493,7 +575,7 @@ impl FanlingRepository {
         self.url.is_some()
     }
     /** check if have/get remote */
-    fn try_get_remote(&self) -> RepoResult<Remote> {
+    fn try_get_remote(&self) -> RepoResult<Remote<'_>> {
         let url = match self.url.clone() {
             Some(u) => u,
             None => {
@@ -731,7 +813,7 @@ impl FanlingRepository {
         repo_timer!("push repo");
         {
             repo_trace!("pushing to remote");
-            let mut remote: Remote = match self.try_get_remote() {
+            let mut remote: Remote<'_> = match self.try_get_remote() {
                 Ok(r) => r,
                 Err(_) => return Err(repo_error!("no remote")),
             };
@@ -777,11 +859,13 @@ impl FanlingRepository {
         self.needs_push = false;
         Ok(())
     }
-    /** set the remote callbacks for a repo access. In particular, set up the SSL credentials to access the repo. */
+    /** set the remote callbacks for a repo access. In particular, set up the SSL credentials to access the repo. `ssh_path` is the file location of the SSH keys. If `slurp_ssh` is set then we try to read the files ourselves, otherwise we let Git try. The resulting callbacks are written to `cb`.
+
+    TODO: pass in the keys instead of slurping them */
     fn set_remote_callbacks(
         ssh_path: &String,
         slurp_ssh: bool,
-        cb: &mut RemoteCallbacks,
+        cb: &mut RemoteCallbacks<'_>,
     ) -> NullResult {
         trace(&format!(
             "setting remote credentials, path {}, {}",
@@ -795,7 +879,7 @@ impl FanlingRepository {
         let ssh_path_copy = ssh_path.clone();
         cb.credentials(move |url, username, allowed| {
             trace(&format!(
-                "{}: looking for credential (url {}, user {:?}, type {:?}) {}",
+                "try #{}: looking for credential (url {}, user {:?}, type {:?}) {}",
                 &try_count,
                 &url,
                 &username,
@@ -804,6 +888,7 @@ impl FanlingRepository {
             ));
             if allowed.contains(CredentialType::SSH_KEY) && !slurp_ssh {
                 //  let ssh_path = format!("{}{}", SSL_KEY_FILE, ".pub");
+                trace("trying ssh key credential");
                 let username = username.expect("no user name");
                 let copy2 = ssh_path_copy.clone();
                 let privatekey = Path::new(&copy2);
@@ -814,35 +899,79 @@ impl FanlingRepository {
                     &username, &publickey, &privatekey
                 ));
                 let cred = Cred::ssh_key(username, Some(&publickey), &privatekey, None);
+                trace("returning ssh key credential");
                 return cred;
             }
             if allowed.contains(CredentialType::SSH_MEMORY) && slurp_ssh {
+                trace("trying ssh memory credential");
                 let username = username.expect("no user name");
-                let publickey_fn = PathBuf::from(format!("{}.pub", ssh_path_copy));
-                let publickey = slurp::read_all_to_string(publickey_fn).expect("bad key file");
-                let privatekey_fn = ssh_path_copy.clone();
-                let privatekey = slurp::read_all_to_string(privatekey_fn).expect("bad key file");
+                // let publickey_fn = PathBuf::from(format!("{}.pub", ssh_path_copy));
+                // let publickey = slurp::read_all_to_string(publickey_fn).unwrap_or_else(|err| {
+                //     trace(&format!("bad public key file: {:?}", err));
+                //     panic!("bad");
+                // });
+                // trace(&format!("got public key, length {}", publickey.len()));
+
+                let publickey = Self::try_slurp_file(
+                    &PathBuf::from(format!("{}.pub", ssh_path_copy)),
+                    "public key",
+                )
+                .unwrap();
+                // let privatekey_fn = ssh_path_copy.clone();
+                // let privatekey = slurp::read_all_to_string(privatekey_fn).unwrap_or_else(|err| {
+                //     trace(&format!("bad private key file: {:?}", err));
+                //     panic!("bad");
+                // });
+                // trace(&format!("got private key, length {}", privatekey.len()));
+
+                let privatekey =
+                    Self::try_slurp_file(&PathBuf::from(ssh_path_copy.clone()), "private key")
+                        .unwrap();
                 let cred = Cred::ssh_key_from_memory(username, Some(&publickey), &privatekey, None);
+                trace("returning ssh memory credential");
                 return cred;
             }
-            trace(&format!("look for credential {:?}", allowed));
+            trace(&format!(
+                "look for credential {:?} ({} tries)",
+                allowed, try_count
+            ));
             try_count += 1;
             if try_count > MAX_TRIES {
                 trace("too many tries for ssh key");
-                panic!("too many ssh tries");
+                panic!("too many ssh tries".to_string());
             }
             ch.try_next_credential(url, username, allowed)
         });
         cb.push_update_reference(|refer, reason_opt| {
+            trace("pushing update reference");
             let msg = if let Some(reason) = reason_opt {
                 format!("rejected because: {}", reason)
             } else {
                 "accepted".to_string()
             };
-            trace(&format!("push update reference ({}): {}", &refer, &msg));
+            trace(&format!(
+                "push update reference ({}): {}) done",
+                &refer, &msg
+            ));
             Ok(())
         });
+        trace("set up credentials");
         Ok(())
+    }
+    /** `try_slurp_file` tries to slurp a file */
+    fn try_slurp_file(path: &PathBuf, narr: &str) -> Result<String, RepoError> {
+        trace(&format!("slurping from {:?} for {}...", &path, narr));
+        match slurp::read_all_to_string(path) {
+            Err(err) => {
+                let msg = format!("bad {} file: {:?}", narr, err);
+                trace(&msg);
+                Err(RepoError::from(err))
+            }
+            Ok(s) => {
+                trace(&format!("got {}", narr /* , &s */));
+                Ok(s)
+            }
+        }
     }
     // /** Get a path to SSL credentials. */
     // fn ssh_path(file_name: &str) -> Result<PathBuf, RepoError> {
@@ -942,7 +1071,7 @@ impl FanlingRepository {
     }
     /** apply the changes to a tree builder for items */
     fn apply_changes_to_item_treebuilder(
-        tree_builder: &mut TreeBuilder,
+        tree_builder: &mut TreeBuilder<'_>,
         changes_with_oids: &ChangeWithOidList,
     ) -> Result<Vec<String>, RepoError> {
         repo_trace!("applying changes to tree builder");
@@ -1033,7 +1162,7 @@ impl FanlingRepository {
         Ok(all)
     }
     /** print out some debug info about a tree */
-    pub(crate) fn describe_tree(tree: &Tree, descr: &str) {
+    pub(crate) fn describe_tree(tree: &Tree<'_>, descr: &str) {
         let mut descrs: Vec<String> = vec![];
         descrs.push(format!(
             "tree: {} ({} entries) ",
@@ -1123,14 +1252,14 @@ impl Drop for FanlingRepository {
     }
 }
 /** descibe a git2 Object without crashing */
-fn describe_git_object(obj: &git2::Object) -> String {
+fn describe_git_object(obj: &git2::Object<'_>) -> String {
     match obj.kind() {
         None => "(nothing)".to_owned(),
         Some(git2::ObjectType::Commit) => "commit".to_owned(),
         Some(k) => format!("other {:?}", k),
     }
 }
-/** a version of an [Item], for merging */
+/** a version of an `Item`, for merging */
 //#[derive(Debug)]
 pub struct ItemEntry {
     pub path: String,

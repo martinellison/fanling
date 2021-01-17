@@ -8,21 +8,18 @@ use crate::item::Ident;
 use crate::item::{Item, ItemBaseForSerde, ItemRef};
 use crate::shared::{FLResult, FanlingError, NullResult, Tracer};
 use regex::Regex;
-use taipo_git_control::MergeOutcome;
 use taipo_git_control::{
-    Change, ChangeList, ConflictList, EntryDescr, FanlingRepository, ObjectOperation,
+    Change, ChangeList, ConflictList, EntryDescr, FanlingRepository, MergeOutcome, ObjectOperation,
     RepoActionRequired, RepoOptions,
 };
 
+use crate::fanling_error;
 use log::trace;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::Deref;
 use std::panic;
 use std::panic::AssertUnwindSafe;
-//#[macro_use]
-use crate::fanling_error;
-// use std::any::Any;
 
 /** FUTURE: check that repo "file names" (within the repo) are the same as in fanling9 namely `items/_ident_.page`
 */
@@ -31,12 +28,19 @@ use crate::fanling_error;
 
 This delegates to the repository as required */
 pub struct Store {
+    /** */
     repo: FanlingRepository,
+    /** the Fanling (git) repository */
     known: HashMap<Ident, ItemRef>,
+    /** map of [`Ident`]s into items */
     pending_changes: ChangeList,
+    /** list of changes that have not been applied to the repository yet */
     unallowed_chars: Regex,
+    /** numeric part of the next identifier to be given to an item */
     next_ident_num: u64,
+    /** find the valid parts of a path (remove file extension) */
     item_path_re: Regex,
+    /** characters to remove from an item ident */
     initial_dash: Regex,
 }
 impl Store {
@@ -76,7 +80,7 @@ impl Store {
             return Err(fanling_error!(&format!("duplicate ident '{}'", &ident)));
         }
         self.known.insert(ident.clone(), item_ref.clone());
-        let blob = item_.to_yaml()?;
+        let blob = item_.to_json()?;
         //  let oid = self.repo.notify_blob(&blob)?;
         self.pending_changes.push(Change::new(
             ObjectOperation::Add(String::from_utf8_lossy(&blob).to_string()),
@@ -112,7 +116,7 @@ impl Store {
             ));
             return Err(fanling_error!(&format!("ident '{}' not known", &ident)));
         }
-        let blob = item_.to_yaml()?;
+        let blob = item_.to_json()?;
         //  let oid = self.repo.notify_blob(&blob)?;
         self.pending_changes.push(Change::new(
             ObjectOperation::Modify(String::from_utf8_lossy(&blob).to_string()),
@@ -160,7 +164,7 @@ impl Store {
             .repo_has_file(&self.path_from_ident(&ident.to_owned()))?)
     }
     /** get the raw data for the item, both the parts common to all types of item and the parts specific to this kind of item. */
-    pub fn get_item_parts(&self, ident: &Ident) -> FLResult<(ItemBaseForSerde, serde_yaml::Value)> {
+    pub fn get_item_parts(&self, ident: &Ident) -> FLResult<(ItemBaseForSerde, serde_json::Value)> {
         fanling_trace!(&format!("getting parts of '{}'", ident));
         assert!(!ident.is_empty(), "Ident is blank when getting item parts");
         let data = self.get_serialised(ident)?;
@@ -174,13 +178,15 @@ impl Store {
             fanling_trace!("error result");
             trace(&format!("error was {:?}", e));
         }
-        trace(&format!("as serialised {:?}", &vec_res));
-        Ok(vec_res?)
+        let as_vec = vec_res?;
+        let as_str = std::str::from_utf8(&as_vec)?;
+        trace(&format!("as serialised: {}", &as_str));
+        Ok(as_vec)
     }
-    /** create an [`Item`] from YAML and add it to the known map. */
+    /** create an [`Item`] from JSON and add it to the known map. */
     pub fn make_known(&mut self, item_rcrc: ItemRef) -> FLResult<ItemRef> {
         // let mut item = item_type.make_raw();
-        // item.set_from_yaml(serde_value, world)?;
+        // item.set_from_json(serde_value, world)?;
         // item.set_from_serde(base)?;
         // assert!(
         //     item.ident() == "" || item.ident() == *base.ident,
@@ -316,7 +322,7 @@ impl Store {
         Ok(self.repo.merge()?)
     }
 
-    ///** latest local commit for fetch */
+    // /** latest local commit for fetch */
     // pub fn our_commit(&self) -> FLResult<Commit> {
     //     Ok(self.repo.our_commit()?)
     // }

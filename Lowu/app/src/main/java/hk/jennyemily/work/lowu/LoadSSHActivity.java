@@ -1,9 +1,7 @@
 package hk.jennyemily.work.lowu;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -18,7 +16,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 
 public class LoadSSHActivity extends AppCompatActivity {
-    private final static String TAG = "fanling10-load-SSH";
+    private final static String TAG = "Lowu load SSH";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,22 +24,19 @@ public class LoadSSHActivity extends AppCompatActivity {
         setContentView(R.layout.activity_load_ssh);
         final Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
-        final Button button = (Button) findViewById(R.id.buttonAddFiles);
+        final Button button = findViewById(R.id.buttonAddFiles);
         button.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
-                final String ssh_path = sp.getString("ssh_path", "??");
-                if (ssh_path != "??") {
-                    final Context context = getApplicationContext();
-                    uploadUsingEditText(R.id.editTextPrivateKey, ssh_path, context);
-                    uploadUsingEditText(R.id.editTextPublicKey, ssh_path + ".pub", context);
-                }
+                // SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
+                final Context context = getApplicationContext();
+                uploadUsingEditText(R.id.editTextPrivateKey, PathMaker.pathName(PathMaker.Kind.PRIVATE_KEY, context), context);
+                uploadUsingEditText(R.id.editTextPublicKey, PathMaker.pathName(PathMaker.Kind.PUBLIC_KEY, context), context);
             }
         });
     }
 
     private void uploadUsingEditText(int id, String filePath, Context context) {
-        final EditText editText = (EditText) findViewById(id);
+        final EditText editText = findViewById(id);
         final String key = editText.getText().toString();
         writeToFile(filePath, key, context);
     }
@@ -49,8 +44,8 @@ public class LoadSSHActivity extends AppCompatActivity {
     private void writeToFile(String filePath, String data, Context context) {
         try {
             Log.d(TAG, "Writing to " + filePath + "...");
-            File file = new File(getFilesDir(), filePath);
-            Log.d(TAG, "Writing to " + file.getAbsolutePath() +"...");
+            File file = new File(filePath);
+            Log.d(TAG, "Writing to " + file.getAbsolutePath() + "...");
             FileOutputStream fileOutputStream = new FileOutputStream(file);
             OutputStreamWriter outputStreamWriter = new OutputStreamWriter(fileOutputStream);
             Log.d(TAG, "Writing '" + data.substring(0, 20) + "'...");

@@ -20,7 +20,7 @@ use fanling_interface::error_response_result;
 use log::trace;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_json::Value;
 use std::boxed::Box;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -279,14 +279,14 @@ impl crate::item::ItemData for Task {
         Ok(resp)
     }
 
-    fn to_yaml(&self, base: &crate::item::ItemBase) -> Result<Vec<u8>, FanlingError> {
+    fn to_json(&self, base: &crate::item::ItemBase) -> Result<Vec<u8>, FanlingError> {
         let for_serde = TaskItemForSerde {
             base: crate::item::ItemBaseForSerde::from_base(base)?,
             data: TaskForSerde::try_from(self)?,
         };
-        let yaml = serde_yaml::to_vec(&for_serde)?;
-        trace(&format!("yaml is {}", String::from_utf8_lossy(&yaml)));
-        Ok(yaml)
+        let json = serde_json::to_vec(&for_serde)?;
+        trace(&format!("json is {}", String::from_utf8_lossy(&json)));
+        Ok(json)
     }
     fn is_open(&self) -> bool {
         match self.status {
@@ -382,13 +382,13 @@ impl crate::item::ItemData for Task {
         };
         Ok(())
     }
-    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value, world: &mut World) -> NullResult {
-        //    *self = serde_yaml::from_value(yaml)?;
-        trace("setting task from yaml...");
+    fn set_from_json(&mut self, json: &serde_json::Value, world: &mut World) -> NullResult {
+        //    *self = serde_json::from_value(json)?;
+        trace("setting task from json...");
         let mut tfs = TaskForSerde::default();
-        tfs.set_from_yaml(yaml)?;
+        tfs.set_from_json(json)?;
         *self = Task::task_from(&mut tfs, world)?;
-        trace("set task from yaml.");
+        trace("set task from json.");
         Ok(())
     }
     fn do_action(
@@ -436,12 +436,12 @@ impl crate::item::ItemData for Task {
     /** transitional code to fix some old data */
     fn fix_data(
         &self,
-        yaml: &serde_yaml::Value,
+        json: &serde_json::Value,
         base: &mut ItemBase,
         world: &mut World,
     ) -> NullResult {
         //  trace("fixing task data...");
-        if let Some(project) = yaml.get("project") {
+        if let Some(project) = json.get("project") {
             //   trace("task has project");
             if let Some(project_name) = project.as_str() {
                 if !base.has_parent() && !project_name.is_empty() {
@@ -475,8 +475,8 @@ struct TaskItemForSerde {
     data: TaskForSerde,
 }
 impl TaskItemForSerde {
-    //     fn set_from_yaml(&mut self, yaml: serde_yaml::Value) -> NullResult {
-    //         *self = serde_yaml::from_value(yaml)?;
+    //     fn set_from_json(&mut self, json: serde_json::Value) -> NullResult {
+    //         *self = serde_json::from_value(json)?;
     //         Ok(())
     //     }
 }
@@ -545,9 +545,9 @@ impl Default for TaskForSerde {
     }
 }
 impl TaskForSerde {
-    /** set from YAML data */
-    fn set_from_yaml(&mut self, yaml: &serde_yaml::Value) -> NullResult {
-        *self = serde_yaml::from_value(yaml.clone())?;
+    /** set from JSON data */
+    fn set_from_json(&mut self, json: &serde_json::Value) -> NullResult {
+        *self = serde_json::from_value(json.clone())?;
         self.fix_data();
         Ok(())
     }
@@ -647,10 +647,10 @@ impl crate::item::ItemTypePolicy for TaskTypePolicy {
         theirs: &Value,
     ) -> FLResult<Box<dyn ItemData>> {
         let mut ots = TaskForSerde::default();
-        ots.set_from_yaml(ours)?;
+        ots.set_from_json(ours)?;
         let mut ot = Task::task_from(&mut ots, world)?;
         let mut tts = TaskForSerde::default();
-        tts.set_from_yaml(theirs)?;
+        tts.set_from_json(theirs)?;
         let tt = Task::task_from(&mut tts, world)?;
         ot.name = merge_strings(&ot.name, &tt.name);
         ot.text = merge_strings(&ot.text, &tt.text);
@@ -704,9 +704,9 @@ impl crate::item::ItemTypePolicy for TaskTypePolicy {
         ar
     }
     /** get item data from serde value */
-    fn from_yaml(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
+    fn from_json(&self, values: &Value, world: &mut World) -> FLResult<Box<dyn ItemData>> {
         let mut ts = TaskForSerde::default();
-        ts.set_from_yaml(values)?;
+        ts.set_from_json(values)?;
         let t = Task::task_from(&mut ts, world)?;
         Ok(Box::new(t))
     }
